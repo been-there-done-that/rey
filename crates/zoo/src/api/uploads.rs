@@ -40,6 +40,7 @@ pub async fn create(
         .map_err(|e| validation_error(e.to_string()))?;
 
     let expires_at = Utc::now() + chrono::Duration::hours(24);
+    let object_key = format!("{}/{}", user_id, Uuid::new_v4());
 
     let upload_id = create_upload(
         &state.pool,
@@ -51,6 +52,7 @@ pub async fn create(
         req.part_size,
         req.part_count as i16,
         expires_at,
+        &object_key,
     )
     .await
     .map_err(|e| match e {
@@ -77,8 +79,6 @@ pub async fn create(
     insert_parts_batch(&state.pool, upload_id, &parts)
         .await
         .map_err(internal_error)?;
-
-    let object_key = format!("{}/{}", user_id, upload_id);
 
     let presigned_urls = generate_presigned_urls(
         &state.s3_client,

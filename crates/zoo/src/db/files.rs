@@ -92,7 +92,7 @@ pub async fn list_files_for_sync(
 }
 
 pub async fn archive_file(pool: &PgPool, user_id: Uuid, file_id: i64) -> Result<(), ZooError> {
-    sqlx::query(
+    let result = sqlx::query(
         "UPDATE files SET archived_at = NOW(), updation_time = NOW()
          WHERE id = $1 AND user_id = $2 AND archived_at IS NULL",
     )
@@ -100,5 +100,10 @@ pub async fn archive_file(pool: &PgPool, user_id: Uuid, file_id: i64) -> Result<
     .bind(user_id)
     .execute(pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ZooError::NotFound);
+    }
+
     Ok(())
 }

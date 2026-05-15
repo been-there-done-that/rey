@@ -16,6 +16,15 @@ pub async fn create_client(config: &ZooConfig) -> Result<Client, ZooError> {
         config_builder = config_builder.force_path_style(true);
     }
 
+    let credentials = aws_sdk_s3::config::Credentials::new(
+        config.s3_access_key.clone(),
+        config.s3_secret_key.clone(),
+        None,
+        None,
+        "static",
+    );
+    config_builder = config_builder.credentials_provider(credentials);
+
     let client = Client::from_conf(config_builder.build());
     Ok(client)
 }

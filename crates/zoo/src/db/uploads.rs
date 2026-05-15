@@ -15,10 +15,11 @@ pub async fn create_upload(
     part_size: i32,
     part_count: i16,
     expires_at: chrono::DateTime<Utc>,
+    object_key: &str,
 ) -> Result<Uuid, ZooError> {
     let row = sqlx::query(
-        "INSERT INTO uploads (user_id, device_id, file_hash, file_size, mime_type, part_size, part_count, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        "INSERT INTO uploads (user_id, device_id, file_hash, file_size, mime_type, part_size, part_count, expires_at, object_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
     )
     .bind(user_id)
     .bind(device_id)
@@ -28,6 +29,7 @@ pub async fn create_upload(
     .bind(part_size)
     .bind(part_count)
     .bind(expires_at)
+    .bind(object_key)
     .fetch_one(pool)
     .await
     .map_err(|e| match e {

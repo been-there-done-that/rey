@@ -69,7 +69,19 @@ pub async fn archive(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     archive_file(&state.pool, user_id, file_id)
         .await
-        .map_err(internal_error)?;
+        .map_err(|e| match e {
+            crate::error::ZooError::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::NotFound,
+                        message: "file not found or already archived".to_string(),
+                        details: None,
+                    },
+                }),
+            ),
+            _ => internal_error(e),
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 

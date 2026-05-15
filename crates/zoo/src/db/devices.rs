@@ -46,6 +46,19 @@ pub async fn lookup_by_sse_token(
     Ok(device)
 }
 
+pub async fn lookup_device_by_id(
+    pool: &PgPool,
+    device_id: Uuid,
+) -> Result<Option<Device>, ZooError> {
+    let device = sqlx::query_as::<_, Device>(
+        "SELECT * FROM devices WHERE id = $1 AND is_active = TRUE",
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(device)
+}
+
 pub async fn tombstone_device(pool: &PgPool, device_id: Uuid) -> Result<(), ZooError> {
     sqlx::query("UPDATE devices SET is_active = FALSE WHERE id = $1")
         .bind(device_id)

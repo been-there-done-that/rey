@@ -560,6 +560,26 @@ async fn test_upload_complete() {
     let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
+    // Transition: pending -> encrypting
+    let resp1 = client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .json(&json!({ "status": "encrypting" }))
+        .send()
+        .await
+        .expect("patch to encrypting failed");
+    assert_eq!(resp1.status(), 200, "patch to encrypting failed: {:?}", resp1.text().await);
+
+    // Transition: encrypting -> uploading
+    let resp2 = client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .json(&json!({ "status": "uploading" }))
+        .send()
+        .await
+        .expect("patch to uploading failed");
+    assert_eq!(resp2.status(), 200, "patch to uploading failed: {:?}", resp2.text().await);
+
     let resp = client
         .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
         .bearer_auth(&token)
@@ -793,6 +813,31 @@ async fn test_upload_register_file() {
 
     let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
     let upload_id = body["upload_id"].as_str().unwrap();
+
+    // Transition through states: pending -> encrypting -> uploading -> s3_completed
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .json(&json!({ "status": "encrypting" }))
+        .send()
+        .await
+        .expect("patch to encrypting failed");
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .json(&json!({ "status": "uploading" }))
+        .send()
+        .await
+        .expect("patch to uploading failed");
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .json(&json!({ "status": "s3_completed" }))
+        .send()
+        .await
+        .expect("patch to s3_completed failed");
 
     let resp = client
         .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
