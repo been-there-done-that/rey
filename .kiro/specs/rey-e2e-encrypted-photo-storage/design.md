@@ -134,6 +134,48 @@ These violations are prevented at compile time by Cargo's dependency resolver. I
 | `crypto` imports any I/O crate | `#![no_std]` compatible; no `std::fs`, no `tokio` |
 | `types` imports any internal crate | Only `serde`, `serde_json` in `types/Cargo.toml` |
 
+### 2.4 Feature Flags
+
+Implements STRUCTURE.md §8. Feature flags gate platform-specific code and optional backends.
+
+| Crate | Feature | Effect | Default |
+|---|---|---|---|
+| `crypto` | `std` | Full std crypto (rand, OsRng) | Yes |
+| `crypto` | `no_std` | Disable std, for embedded/WASM targets | No |
+| `zoo` | `s3` | AWS S3 storage backend | Yes |
+| `zoo` | `local-fs` | Local filesystem storage backend (dev/testing) | No |
+| `client-lib` | `desktop` | Enable Tauri desktop commands | Yes |
+| `local-db` | `sqlcipher` | SQLCipher encryption for SQLite | Yes |
+
+**Usage:** `cargo build -p crypto --no-default-features --features no_std` for WASM targets. `cargo build -p zoo --no-default-features --features local-fs` for local dev without S3.
+
+### 2.5 Build Order & Compilation Parallelism
+
+Implements STRUCTURE.md §7. Cargo compiles independent crates in parallel at each step.
+
+```
+Step 1 (2 in parallel):  types, common
+
+Step 2 (4 in parallel):  crypto, image, zoo-client, zoo
+
+Step 3 (2 in parallel):  metadata, thumbnail
+
+Step 4 (2 in parallel):  local-db, sync
+
+Step 5 (2 in parallel):  client-lib, zoo-wasm
+```
+
+**Change Impact:**
+
+| Change to | Recompiles |
+|---|---|
+| `types` | Everything |
+| `crypto` | `metadata`, `thumbnail`, `sync`, `client-lib` |
+| `image` | `metadata`, `thumbnail`, `sync`, `client-lib` |
+| `zoo` | Nothing outside server (self-contained) |
+| `sync` | `client-lib` only |
+| `client-lib` | Nothing downstream (terminal crate) |
+
 
 ---
 
@@ -1189,7 +1231,21 @@ async fn sync_all(engine: &SyncEngine) -> Result<(), SyncError>:
   thumbnails::queue_new_files(&local_db).await?
 ```
 
-**Offline behavior (Req 8.8):** `sync_all()` is only called when the network is available. All read operations (browse, search) go directly to `local_db` without calling `sync_all()`. The caller (client-lib) checks connectivity before invoking sync.
+**First Sync vs Incremental (SPEC §2.6):**
+
+| Scenario | Cursor | Behavior |
+|---|---|---|
+| First sync (new device) | `since=0` | Full download of all metadata + thumbnails |
+| Normal sync | `since=last_sync` | Only files with `updation_time > cursor` |
+| Re-login / clear data | Reset to `since=0` | Metadata fetched from scratch (thumbnails can reuse disk cache by file ID) |
+| Offline | No sync | All operations against local DB. Queued changes saved for next sync. |
+
+**Offline behavior (Req 8.8, SPEC §2.7):** `sync_all()` is only called when the network is available. All read operations (browse, search, grid view) go directly to `local_db` without calling `sync_all()`. The caller (client-lib) checks connectivity before invoking sync. When offline:
+- All metadata is local — full search, browse, and grid view work offline
+- Cached thumbnails (L1 memory + L2 disk) render the grid
+- Opening a full image requires network (unless previously cached for offline)
+- Uploads are queued locally and sent when online
+- Queued changes (new collections, archived files) are saved to local DB and applied on next sync
 
 ### 6.3 Version-Consistent Pagination
 
@@ -1631,6 +1687,15 @@ impl ThumbnailCache {
 **In-flight deduplication (Req 11.5):** `InflightMap` is a `DashMap<FileId, Arc<tokio::sync::Notify>>`. When a download starts, it inserts a `Notify`. Concurrent requests for the same `file_id` wait on the `Notify`. When the download completes, `notify_waiters()` is called and the entry is removed.
 
 **Cache miss on evicted disk entry (Req 11.8):** If `disk.get()` returns `None` (entry was evicted by the OS or user), the code falls through to the download path transparently.
+
+**Cache Invalidation (SPEC §3.4):**
+
+| Event | Action |
+|---|---|
+| File deleted/archived | Remove thumbnail from disk + memory cache via `ThumbnailCache::evict(file_id)` |
+| Thumbnail re-uploaded | Invalidate cache entry, re-download on next view |
+| App cache cleared | All thumbnails re-downloaded on demand |
+| Disk space low | OS may evict cache directory; handled as cache miss (falls through to download path) |
 
 
 ---
@@ -2257,6 +2322,37 @@ This section covers error types, propagation strategies, and handling across all
 4. **Upload failures are surfaced via SSE.** When the GC or stall detector marks an upload FAILED, an `upload.failed` SSE event is broadcast to all connected devices (Req 18.4, 16.2).
 5. **API errors use a standard JSON schema.** All Zoo API errors return `{"error": {"code": "...", "message": "...", "details": {...}}}` (ZOO.md §17).
 
+### API Error Response Schema (ZOO.md §17)
+
+All Zoo API errors follow this JSON structure:
+
+```json
+{
+  "error": {
+    "code": "error_code_snake_case",
+    "message": "Human-readable description",
+    "details": {}
+  }
+}
+```
+
+Standard error codes:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `unauthorized` | 401 | Missing or invalid auth |
+| `forbidden` | 403 | Authenticated but not authorized for this resource |
+| `not_found` | 404 | Upload or file not found |
+| `upload_already_exists` | 409 | Active upload already exists for this file_hash |
+| `invalid_state_transition` | 409 | Status transition not allowed by state machine |
+| `device_name_taken` | 409 | Device name already in use by this user |
+| `validation_error` | 400 | Request body validation failed |
+| `file_too_large` | 400 | Exceeds max_file_size |
+| `part_count_exceeded` | 400 | Exceeds max_part_count |
+| `size_mismatch` | 400 | File size doesn't match S3 HeadObject |
+| `rate_limited` | 429 | Rate limit exceeded (includes `Retry-After` header) |
+| `internal_error` | 500 | Unexpected server error |
+
 ### Security Considerations
 
 ### 12.1 Zero-Knowledge Guarantee
@@ -2325,6 +2421,86 @@ async fn login(body: LoginRequest, db: &Db) -> Result<LoginResponse, ApiError> {
 ```
 
 `DUMMY_BCRYPT_HASH` is a pre-computed bcrypt hash of a random string, stored as a server constant. It ensures the timing of a failed login for a non-existent email is identical to a failed login for an existing email.
+
+### 5.9 Rate Limiting
+
+Implements ZOO.md §18.2. Rate limits are enforced via a Tower middleware layer.
+
+| Endpoint | Limit | Window | Response on exceed |
+|---|---|---|---|
+| POST /api/uploads | 100 | per hour per user | HTTP 429 + `Retry-After` header |
+| POST .../presign | 50 | per upload | HTTP 429 + `Retry-After` header |
+| PATCH /api/uploads/{id} | 1 per 5 seconds | per upload | HTTP 429 + `Retry-After` header |
+| GET /api/files/{id}/download | 1000 | per hour per user | HTTP 429 + `Retry-After` header |
+| GET /api/events | 1 concurrent | per device | HTTP 429 + `Retry-After` header |
+
+Rate limit state is stored in-memory using `dashmap::DashMap<String, RateLimitState>` keyed by user_id. For horizontal scaling, a Redis-backed rate limiter can be swapped in later. Rate-limited requests return HTTP 429 with a `Retry-After` header indicating seconds until the window resets.
+
+### 5.10 Input Validation
+
+Implements ZOO.md §18.3. All request bodies are validated before processing using `axum` extractors with custom validation.
+
+| Field | Validation | Error on failure |
+|---|---|---|
+| file_size | ≤ max_file_size (10 GiB) | 400 `validation_error` |
+| part_size | ≥ 5 MiB, ≤ 5 GiB | 400 `validation_error` |
+| part_count | ≥ 1, ≤ 10000 | 400 `part_count_exceeded` |
+| part_md5s | must match part_count, each must decode to 16 bytes | 400 `validation_error` |
+| email | valid email format, ≤ 255 chars | 400 `validation_error` |
+| device name | ≤ 64 chars, no null bytes | 400 `validation_error` |
+| All string fields | length-limited, Unicode-safe, no null bytes | 400 `validation_error` |
+
+Validation is performed in the Axum handler before any DB or S3 operations. Invalid requests return HTTP 400 with the standard error schema (§12.5).
+
+### 5.11 Configuration
+
+Implements ZOO.md §15. Environment-driven configuration loaded at startup.
+
+```rust
+// crates/zoo/src/config.rs
+
+pub struct ZooConfig {
+    pub listen_addr: SocketAddr,              // default: 0.0.0.0:3002
+    pub database_url: String,                 // PostgreSQL connection string
+    pub s3_endpoint: String,
+    pub s3_region: String,
+    pub s3_bucket: String,
+    pub s3_access_key: String,
+    pub s3_secret_key: String,
+    pub session_ttl: Duration,                // default: 30 days
+    pub download_mode: DownloadMode,          // redirect or proxy
+    pub stall_timeout: Duration,              // default: 90s
+    pub presigned_ttl: Duration,              // default: 24h
+    pub gc_interval: Duration,                // default: 5m
+    pub max_file_size: u64,                   // default: 10GiB
+    pub max_part_count: u16,                  // default: 10000
+    pub default_part_size: u32,               // default: 20MiB
+}
+
+pub enum DownloadMode {
+    Redirect { presigned_ttl: Duration },
+    Proxy { max_concurrent: usize },
+}
+```
+
+Environment variable mapping:
+
+| Env Var | Config Field | Default |
+|---|---|---|
+| `LISTEN_ADDR` | `listen_addr` | `0.0.0.0:3002` |
+| `DATABASE_URL` | `database_url` | — (required) |
+| `S3_ENDPOINT` | `s3_endpoint` | — (required) |
+| `S3_REGION` | `s3_region` | — (required) |
+| `S3_BUCKET` | `s3_bucket` | — (required) |
+| `S3_ACCESS_KEY` | `s3_access_key` | — (required) |
+| `S3_SECRET_KEY` | `s3_secret_key` | — (required) |
+| `SESSION_TTL_DAYS` | `session_ttl` | `30` |
+| `DOWNLOAD_MODE` | `download_mode` | `redirect` |
+| `STALL_TIMEOUT_SECONDS` | `stall_timeout` | `90` |
+| `PRESIGNED_TTL_HOURS` | `presigned_ttl` | `24` |
+| `GC_INTERVAL_SECONDS` | `gc_interval` | `300` |
+| `MAX_FILE_SIZE` | `max_file_size` | `10737418240` |
+| `DEFAULT_PART_SIZE` | `default_part_size` | `20971520` |
 
 ### 12.3 Memory Protection
 
