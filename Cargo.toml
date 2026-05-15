@@ -66,6 +66,8 @@ secrecy = "0.8"
 dirs-next = "2.0"
 toml = "0.8"
 types = { path = "crates/types" }
+subtle = "2.5"
+aead = "0.5"
 
 [profile.dev.package.crypto]
 opt-level = 3
