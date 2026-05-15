@@ -2,13 +2,13 @@
 
 **Date**: 2026-05-15
 **Branch**: audit/implementation-vs-plan
-**Commit**: a2f37ae (Implement thumbnail crate)
+**Commit**: cd548a1 (Fix failing tests, add missing crate deps)
 
 ---
 
 ## Executive Summary
 
-The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete), while **Layer 2 and Layer 3 crates remain stubs** with only placeholder `fn add(a, b)` functions. The workspace compiles cleanly. Of 33 tests run, 31 pass and 2 fail (environment variable tests in `common`).
+The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete), while **Layer 2 and Layer 3 crates remain stubs** with only placeholder `fn add(a, b)` functions. The workspace compiles cleanly. **All 151 tests pass** (previously 3 failing, now fixed).
 
 **Completion: ~50% by crate count, ~80% by lines of code**
 
@@ -19,13 +19,9 @@ The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete
 | Check | Status |
 |---|---|
 | `cargo check --workspace` | PASS |
-| `cargo test --workspace` | FAIL (2/33 tests failing) |
+| `cargo test --workspace` | PASS (151/151 tests) |
 | `cargo clippy --workspace` | Not yet run |
 | `cargo fmt --check` | Not yet run |
-
-### Failing Tests
-- `common::config::tests::test_from_env_reads_db_path` — env var `REY_DB_PATH` not being read correctly
-- `common::config::tests::test_from_env_reads_log_level` — env var `REY_LOG_LEVEL` not being read correctly
 
 ---
 
@@ -58,9 +54,9 @@ The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete
 | `time.rs` | Implemented | 91 | 7 |
 | `result.rs` | Implemented | 94 | 4 |
 
-**Total**: ~565 lines, 26 tests. All planned modules present.
+**Total**: ~565 lines, 27 tests. All planned modules present.
 
-**Issues**: 2 failing tests related to environment variable reading in `config.rs`.
+**Fixed**: 2 failing tests (env var race conditions) — added Mutex for test isolation.
 
 ---
 
@@ -230,11 +226,11 @@ The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete
 | Crate | Meaningful Tests | Stub Tests | Coverage Quality |
 |---|---|---|---|
 | `types` | 37 | 0 | Good — serde round-trips, serialization, enum variants |
-| `common` | 26 (2 failing) | 0 | Good — config, error, time, telemetry |
-| `crypto` | 46 | 0 | Excellent — includes property tests |
+| `common` | 27 | 0 | Good — config, error, time, telemetry (fixed race conditions) |
+| `crypto` | 40 | 0 | Excellent — includes property tests |
 | `image` | 17 | 0 | Good — decode, encode, resize, EXIF, orientation |
-| `metadata` | 9 | 0 | Good — round-trip tests in lib.rs |
-| `thumbnail` | 16 | 0 | Good — generate, cache, memory, disk, inflight |
+| `metadata` | 8 | 0 | Good — round-trip tests in lib.rs |
+| `thumbnail` | 16 | 0 | Good — generate, cache, memory, disk, inflight (fixed race conditions) |
 | `local-db` | 0 | 1 | None — stub only |
 | `sync` | 0 | 1 | None — stub only |
 | `zoo-client` | 0 | 1 | None — stub only |
@@ -242,7 +238,7 @@ The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete
 | `client-lib` | 0 | 1 | None — stub only |
 | `zoo-wasm` | 0 | 1 | None — stub only |
 
-**Total**: 151 meaningful tests, 6 stub tests.
+**Total**: 145 meaningful tests, 6 stub tests. All 151 passing.
 
 ---
 
@@ -269,10 +265,11 @@ The Rey project has **6 of 12 crates implemented** (Layer 0 and Layer 1 complete
 
 ## 6. Action Items (Priority Order)
 
-### P0 — Fix Existing Issues
-1. **Fix 2 failing tests in `common`**: `config.rs` env var reading for `REY_DB_PATH` and `REY_LOG_LEVEL`
-2. **Add `metadata` dependency to `thumbnail/Cargo.toml`** (planned but missing)
-3. **Add `image` dependency to `metadata/Cargo.toml`** (planned but missing)
+### P0 — Fix Existing Issues (COMPLETED)
+1. ~~**Fix 2 failing tests in `common`**: `config.rs` env var reading for `REY_DB_PATH` and `REY_LOG_LEVEL`~~ — FIXED with Mutex
+2. ~~**Add `metadata` dependency to `thumbnail/Cargo.toml`** (planned but missing)~~ — FIXED
+3. ~~**Add `image` dependency to `metadata/Cargo.toml`** (planned but missing)~~ — FIXED
+4. ~~**Fix disk cache test race condition in `thumbnail`**~~ — FIXED with tempfile::TempDir
 
 ### P1 — Complete Missing Layer 1 Files
 4. **Implement `metadata/magic.rs`** — Public magic metadata for server-side sorting
