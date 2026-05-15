@@ -11,6 +11,7 @@ pub enum UploadStatus {
     Done,
     Stalled,
     Failed,
+    Resuming,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

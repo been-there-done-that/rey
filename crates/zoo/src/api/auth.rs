@@ -108,6 +108,9 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<UserRegistration>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    crate::validation::validate_email(&req.email)
+        .map_err(|e| validation_error(e.to_string()))?;
+
     register_user(
         &state.pool,
         &req.email,
@@ -194,6 +197,19 @@ fn internal_error(e: crate::error::ZooError) -> (StatusCode, Json<ErrorResponse>
             error: ApiError {
                 code: ErrorCode::InternalError,
                 message: e.to_string(),
+                details: None,
+            },
+        }),
+    )
+}
+
+fn validation_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            error: ApiError {
+                code: ErrorCode::ValidationError,
+                message: msg,
                 details: None,
             },
         }),

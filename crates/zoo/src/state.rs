@@ -41,6 +41,9 @@ pub fn validate_transition(from: UploadStatus, to: UploadStatus) -> Result<(), A
             | (UploadStatus::Registering, UploadStatus::Failed)
             | (UploadStatus::Stalled, UploadStatus::Uploading)
             | (UploadStatus::Stalled, UploadStatus::Failed)
+            | (UploadStatus::Stalled, UploadStatus::Resuming)
+            | (UploadStatus::Resuming, UploadStatus::Uploading)
+            | (UploadStatus::Resuming, UploadStatus::Failed)
     );
 
     if valid {

@@ -24,7 +24,7 @@ pub async fn create(
     axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
     headers: axum::http::HeaderMap,
     Json(req): Json<UploadRequest>,
-) -> Result<Json<UploadState>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<(StatusCode, Json<UploadState>), (StatusCode, Json<ErrorResponse>)> {
     let device_id_str = headers
         .get("x-device-id")
         .and_then(|v| v.to_str().ok())
@@ -123,7 +123,7 @@ pub async fn create(
         .await
         .map_err(internal_error)?;
 
-    Ok(Json(upload_state))
+    Ok((StatusCode::CREATED, Json(upload_state)))
 }
 
 pub async fn get_status(
@@ -374,8 +374,339 @@ pub async fn fail(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct PatchStatusRequest {
+    pub status: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct PresignRequest {
+    pub part_md5s: Vec<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct PresignResponse {
+    pub urls: Vec<String>,
+    pub complete_url: String,
+}
+
+pub async fn patch_status(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Path(upload_id): axum::extract::Path<Uuid>,
+    Json(req): Json<PatchStatusRequest>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let upload = get_upload(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
+
+    let upload = match upload {
+        Some(u) if u.user_id == user_id => u,
+        Some(_) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::Forbidden,
+                        message: "not your upload".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::NotFound,
+                        message: "upload not found".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+    };
+
+    let current_status = parse_status(&upload.status);
+    let target_status = parse_status(&req.status);
+    validate_transition(current_status, target_status).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::InvalidStateTransition,
+                    message: e.message,
+                    details: None,
+                },
+            }),
+        )
+    })?;
+
+    patch_upload_status(&state.pool, upload_id, &req.status)
+        .await
+        .map_err(internal_error)?;
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn presign(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Path(upload_id): axum::extract::Path<Uuid>,
+    Json(req): Json<PresignRequest>,
+) -> Result<Json<PresignResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let upload = get_upload(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
+
+    let upload = match upload {
+        Some(u) if u.user_id == user_id => u,
+        Some(_) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::Forbidden,
+                        message: "not your upload".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::NotFound,
+                        message: "upload not found".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+    };
+
+    let object_key = upload.object_key.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::ValidationError,
+                    message: "upload has no object key".to_string(),
+                    details: None,
+                },
+            }),
+        )
+    })?;
+
+    let presigned_urls = generate_presigned_urls(
+        &state.s3_client,
+        &state.config.s3_bucket,
+        &object_key,
+        &req.part_md5s,
+        state.config.presigned_ttl,
+    )
+    .await
+    .map_err(internal_error)?;
+
+    let urls: Vec<String> = presigned_urls.urls.clone();
+    let complete_url = build_complete_url(
+        &state.s3_client,
+        &state.config.s3_bucket,
+        &object_key,
+        &presigned_urls.upload_id_s3,
+    );
+
+    let urls_expire_at =
+        Utc::now() + chrono::Duration::from_std(state.config.presigned_ttl).unwrap();
+
+    update_s3_info(
+        &state.pool,
+        upload_id,
+        &presigned_urls.upload_id_s3,
+        &complete_url,
+        urls_expire_at,
+    )
+    .await
+    .map_err(internal_error)?;
+
+    Ok(Json(PresignResponse {
+        urls,
+        complete_url,
+    }))
+}
+
+pub async fn presign_refresh(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Path(upload_id): axum::extract::Path<Uuid>,
+) -> Result<Json<PresignResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let upload = get_upload(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
+
+    let upload = match upload {
+        Some(u) if u.user_id == user_id => u,
+        Some(_) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::Forbidden,
+                        message: "not your upload".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::NotFound,
+                        message: "upload not found".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+    };
+
+    let object_key = upload.object_key.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::ValidationError,
+                    message: "upload has no object key".to_string(),
+                    details: None,
+                },
+            }),
+        )
+    })?;
+
+    let part_count = upload.part_count as usize;
+    let part_md5s: Vec<String> = (0..part_count).map(|_| String::new()).collect();
+
+    let presigned_urls = generate_presigned_urls(
+        &state.s3_client,
+        &state.config.s3_bucket,
+        &object_key,
+        &part_md5s,
+        state.config.presigned_ttl,
+    )
+    .await
+    .map_err(internal_error)?;
+
+    let urls: Vec<String> = presigned_urls.urls.clone();
+    let complete_url = build_complete_url(
+        &state.s3_client,
+        &state.config.s3_bucket,
+        &object_key,
+        &presigned_urls.upload_id_s3,
+    );
+
+    let urls_expire_at =
+        Utc::now() + chrono::Duration::from_std(state.config.presigned_ttl).unwrap();
+
+    update_s3_info(
+        &state.pool,
+        upload_id,
+        &presigned_urls.upload_id_s3,
+        &complete_url,
+        urls_expire_at,
+    )
+    .await
+    .map_err(internal_error)?;
+
+    Ok(Json(PresignResponse {
+        urls,
+        complete_url,
+    }))
+}
+
+pub async fn cancel(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Path(upload_id): axum::extract::Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    let upload = get_upload(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
+
+    let upload = match upload {
+        Some(u) if u.user_id == user_id => u,
+        Some(_) => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::Forbidden,
+                        message: "not your upload".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error: ApiError {
+                        code: ErrorCode::NotFound,
+                        message: "upload not found".to_string(),
+                        details: None,
+                    },
+                }),
+            ))
+        }
+    };
+
+    let current_status = parse_status(&upload.status);
+    validate_transition(current_status, UploadStatus::Failed).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::InvalidStateTransition,
+                    message: e.message,
+                    details: None,
+                },
+            }),
+        )
+    })?;
+
+    patch_upload_status(&state.pool, upload_id, "failed")
+        .await
+        .map_err(internal_error)?;
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn list_pending(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<ListQueryParams>,
+) -> Result<Json<Vec<UploadState>>, (StatusCode, Json<ErrorResponse>)> {
+    let uploads = crate::db::uploads::list_uploads_for_user(&state.pool, user_id, query.status.as_deref())
+        .await
+        .map_err(internal_error)?;
+
+    let states: Vec<UploadState> = uploads.into_iter().map(upload_to_state).collect();
+    Ok(Json(states))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ListQueryParams {
+    pub status: Option<String>,
+}
+
 struct PresignedUrls {
     upload_id_s3: String,
+    urls: Vec<String>,
 }
 
 async fn generate_presigned_urls(
@@ -395,8 +726,9 @@ async fn generate_presigned_urls(
 
     let upload_id = create_resp.upload_id().unwrap_or_default().to_string();
 
+    let mut urls = Vec::with_capacity(part_md5s.len());
     for (i, _) in part_md5s.iter().enumerate() {
-        let _url = presign_part_upload(
+        let url = presign_part_upload(
             s3_client,
             bucket,
             object_key,
@@ -405,10 +737,12 @@ async fn generate_presigned_urls(
             ttl,
         )
         .await?;
+        urls.push(url);
     }
 
     Ok(PresignedUrls {
         upload_id_s3: upload_id,
+        urls,
     })
 }
 
@@ -467,6 +801,7 @@ fn parse_status(s: &str) -> UploadStatus {
         "registering" => UploadStatus::Registering,
         "done" => UploadStatus::Done,
         "stalled" => UploadStatus::Stalled,
+        "resuming" => UploadStatus::Resuming,
         _ => UploadStatus::Failed,
     }
 }

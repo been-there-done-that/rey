@@ -142,3 +142,26 @@ pub async fn list_expired_uploads(
     .await?;
     Ok(uploads)
 }
+
+pub async fn list_uploads_for_user(
+    pool: &PgPool,
+    user_id: Uuid,
+    status: Option<&str>,
+) -> Result<Vec<Upload>, ZooError> {
+    let uploads = match status {
+        Some(s) => sqlx::query_as::<_, Upload>(
+            "SELECT * FROM uploads WHERE user_id = $1 AND status = $2 ORDER BY created_at DESC",
+        )
+        .bind(user_id)
+        .bind(s)
+        .fetch_all(pool)
+        .await?,
+        None => sqlx::query_as::<_, Upload>(
+            "SELECT * FROM uploads WHERE user_id = $1 ORDER BY created_at DESC",
+        )
+        .bind(user_id)
+        .fetch_all(pool)
+        .await?,
+    };
+    Ok(uploads)
+}

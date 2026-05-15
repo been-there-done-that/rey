@@ -22,3 +22,6 @@ serde = { workspace = true }
 [dev-dependencies]
 wiremock = { workspace = true }
 tokio = { workspace = true }
+bcrypt = { workspace = true }
+sha2 = "0.10"
+reqwest = { workspace = true, features = ["blocking"] }

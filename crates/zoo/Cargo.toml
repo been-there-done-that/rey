@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "zoo-server"
+path = "bin/server.rs"
+
 [features]
 default = ["s3"]
 s3 = []
@@ -37,3 +41,9 @@ chrono = { workspace = true }
 futures = "0.3"
 axum-extra = { version = "0.9", features = ["typed-header"] }
 anyhow = "1"
+reqwest = { workspace = true }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["blocking"] }
