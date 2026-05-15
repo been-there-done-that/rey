@@ -52,8 +52,8 @@ aws-sdk-s3 = "1"
 aws-config = "1"
 utoipa = { version = "5", features = ["axum_extras"] }
 tauri = { version = "2", features = [] }
-tauri-specta = { version = "2", features = ["derive", "typescript"] }
-specta = "2"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta = "=2.0.0-rc.25"
 rand_core = "0.6"
 proptest = "1"
 wiremock = "0.6"
@@ -76,6 +76,12 @@ rey-image = { path = "crates/image" }
 metadata = { path = "crates/metadata" }
 thumbnail = { path = "crates/thumbnail" }
 crypto = { path = "crates/crypto" }
+local-db = { path = "crates/local-db" }
+zoo-client = { path = "crates/zoo-client" }
+zoo = { path = "crates/zoo" }
+sync = { path = "crates/sync" }
+client-lib = { path = "crates/client-lib" }
+zoo-wasm = { path = "crates/zoo-wasm" }
 
 [profile.dev.package.crypto]
 opt-level = 3
