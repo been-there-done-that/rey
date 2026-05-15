@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/types",
+    "crates/common",
+    "crates/crypto",
+    "crates/image",
+    "crates/metadata",
+    "crates/thumbnail",
+    "crates/local-db",
+    "crates/sync",
+    "crates/zoo-client",
+    "crates/zoo",
+    "crates/client-lib",
+    "crates/zoo-wasm",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/reymotion/rey"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "migrate", "macros"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream"] }
+argon2 = "0.5"
+blake2b_simd = "1"
+chacha20poly1305 = "0.10"
+xsalsa20poly1305 = "0.9"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+bcrypt = "0.15"
+lru = "0.12"
+dashmap = "5"
+rusqlite = { version = "0.30", features = ["sqlcipher", "bundled"] }
+keyring = "2"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
+aws-sdk-s3 = "1"
+aws-config = "1"
+utoipa = { version = "4", features = ["axum_extras"] }
+tauri = { version = "2", features = [] }
+tauri-specta = { version = "2", features = ["derive", "typescript"] }
+specta = "2"
+rand_core = "0.6"
+proptest = "1"
+wiremock = "0.5"
+tempfile = "3"
+base64 = "0.21"
+hex = "0.4"
+image = "0.25"
+kamadak-exif = "0.5"
+secrecy = "0.8"
+
+[profile.dev.package.crypto]
+opt-level = 3
+
+[profile.dev]
+debug = true
+
+[profile.release]
+lto = "thin"
+opt-level = 3
