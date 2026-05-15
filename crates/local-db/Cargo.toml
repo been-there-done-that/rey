@@ -5,4 +5,19 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["sqlcipher"]
+sqlcipher = ["rusqlite/sqlcipher"]
+
 [dependencies]
+types = { workspace = true }
+common = { workspace = true }
+rusqlite = { workspace = true }
+keyring = { workspace = true }
+thiserror = { workspace = true }
+hex = { workspace = true }
+getrandom = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rand = "0.8"

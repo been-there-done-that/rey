@@ -38,7 +38,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 bcrypt = "0.15"
 lru = "0.12"
 dashmap = "5"
-rusqlite = { version = "0.30", features = ["sqlcipher", "bundled"] }
+rusqlite = { version = "0.30", features = ["bundled-sqlcipher"] }
 keyring = "2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -68,10 +68,14 @@ toml = "0.8"
 types = { path = "crates/types" }
 subtle = "2.5"
 aead = "0.5"
+getrandom = "0.2"
+chrono = "0.4"
+rand = "0.8"
 common = { path = "crates/common" }
 rey-image = { path = "crates/image" }
+metadata = { path = "crates/metadata" }
+thumbnail = { path = "crates/thumbnail" }
 crypto = { path = "crates/crypto" }
-chrono = "0.4"
 
 [profile.dev.package.crypto]
 opt-level = 3
