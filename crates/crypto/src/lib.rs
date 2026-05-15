@@ -10,6 +10,7 @@ pub mod seal;
 pub mod util;
 
 pub use types::crypto::{Argon2Profile, EncryptedKey, Header24, Key256, Nonce24, Salt16};
+pub use aead::{secretbox_decrypt, secretbox_encrypt, stream_decrypt, stream_encrypt};
 
 #[cfg(test)]
 mod prop_tests;
