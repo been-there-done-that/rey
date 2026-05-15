@@ -1,7 +1,7 @@
-use sqlx::PgPool;
-use uuid::Uuid;
 use crate::db::models::UploadPart;
 use crate::error::ZooError;
+use sqlx::PgPool;
+use uuid::Uuid;
 
 pub async fn insert_parts_batch(
     pool: &PgPool,

@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use std::env;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,8 +27,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_env() -> Self {
-        let server_url = env::var("REY_SERVER_URL")
-            .unwrap_or_else(|_| "http://localhost:3002".to_string());
+        let server_url =
+            env::var("REY_SERVER_URL").unwrap_or_else(|_| "http://localhost:3002".to_string());
 
         let db_path = env::var("REY_DB_PATH")
             .map(PathBuf::from)
@@ -45,8 +45,7 @@ impl AppConfig {
                 base.join("rey")
             });
 
-        let log_level = env::var("REY_LOG_LEVEL")
-            .unwrap_or_else(|_| "info".to_string());
+        let log_level = env::var("REY_LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
 
         Self {
             server_url,
@@ -61,17 +60,19 @@ impl AppConfig {
 
         match path.extension().and_then(|e| e.to_str()) {
             Some("toml") => {
-                let config: AppConfigFile = toml::from_str(&content).map_err(|e| ConfigError::ParseError {
-                    field: path.display().to_string(),
-                    source: Box::new(e),
-                })?;
+                let config: AppConfigFile =
+                    toml::from_str(&content).map_err(|e| ConfigError::ParseError {
+                        field: path.display().to_string(),
+                        source: Box::new(e),
+                    })?;
                 Ok(config.into_app_config())
             }
             Some("json") => {
-                let config: AppConfigFile = serde_json::from_str(&content).map_err(|e| ConfigError::ParseError {
-                    field: path.display().to_string(),
-                    source: Box::new(e),
-                })?;
+                let config: AppConfigFile =
+                    serde_json::from_str(&content).map_err(|e| ConfigError::ParseError {
+                        field: path.display().to_string(),
+                        source: Box::new(e),
+                    })?;
                 Ok(config.into_app_config())
             }
             _ => Err(ConfigError::ParseError {
@@ -100,7 +101,10 @@ impl AppConfigFile {
         AppConfig {
             server_url: self.server_url.unwrap_or(defaults.server_url),
             db_path: self.db_path.map(PathBuf::from).unwrap_or(defaults.db_path),
-            cache_dir: self.cache_dir.map(PathBuf::from).unwrap_or(defaults.cache_dir),
+            cache_dir: self
+                .cache_dir
+                .map(PathBuf::from)
+                .unwrap_or(defaults.cache_dir),
             log_level: self.log_level.unwrap_or(defaults.log_level),
         }
     }

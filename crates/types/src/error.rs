@@ -35,11 +35,26 @@ mod tests {
 
     #[test]
     fn test_error_code_serialization() {
-        assert_eq!(serde_json::to_string(&ErrorCode::Unauthorized).unwrap(), "\"unauthorized\"");
-        assert_eq!(serde_json::to_string(&ErrorCode::NotFound).unwrap(), "\"not_found\"");
-        assert_eq!(serde_json::to_string(&ErrorCode::UploadAlreadyExists).unwrap(), "\"upload_already_exists\"");
-        assert_eq!(serde_json::to_string(&ErrorCode::InvalidStateTransition).unwrap(), "\"invalid_state_transition\"");
-        assert_eq!(serde_json::to_string(&ErrorCode::RateLimited).unwrap(), "\"rate_limited\"");
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::Unauthorized).unwrap(),
+            "\"unauthorized\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::NotFound).unwrap(),
+            "\"not_found\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::UploadAlreadyExists).unwrap(),
+            "\"upload_already_exists\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::InvalidStateTransition).unwrap(),
+            "\"invalid_state_transition\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::RateLimited).unwrap(),
+            "\"rate_limited\""
+        );
     }
 
     #[test]

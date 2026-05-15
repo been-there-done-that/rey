@@ -42,8 +42,8 @@ impl DiskCache {
 
         let index_path = cache_dir.join("thumbnail_index.json");
         let index = if index_path.exists() {
-            let content = fs::read_to_string(&index_path)
-                .map_err(|e| DiskCacheError::new(e.to_string()))?;
+            let content =
+                fs::read_to_string(&index_path).map_err(|e| DiskCacheError::new(e.to_string()))?;
             serde_json::from_str(&content).unwrap_or_else(|_| CacheIndex {
                 entries: HashMap::new(),
             })
@@ -62,10 +62,9 @@ impl DiskCache {
 
     fn save_index(&self) -> Result<(), DiskCacheError> {
         let index_path = self.cache_dir.join("thumbnail_index.json");
-        let content = serde_json::to_string(&self.index)
-            .map_err(|e| DiskCacheError::new(e.to_string()))?;
-        fs::write(&index_path, content)
-            .map_err(|e| DiskCacheError::new(e.to_string()))
+        let content =
+            serde_json::to_string(&self.index).map_err(|e| DiskCacheError::new(e.to_string()))?;
+        fs::write(&index_path, content).map_err(|e| DiskCacheError::new(e.to_string()))
     }
 
     fn thumb_path(&self, file_id: &str) -> PathBuf {

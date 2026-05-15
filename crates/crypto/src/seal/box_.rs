@@ -1,23 +1,23 @@
-use alloc::vec::Vec;
+use crate::error::CryptoError;
 use aead::{Aead, KeyInit};
+use alloc::vec::Vec;
 use blake2b_simd::Params;
 use rand_core::OsRng;
 use x25519_dalek::{PublicKey, StaticSecret};
 use xsalsa20poly1305::XSalsa20Poly1305;
-use crate::error::CryptoError;
 
 pub fn seal(plaintext: &[u8], recipient_pk: &PublicKey) -> Vec<u8> {
     let ephemeral_sk = StaticSecret::random_from_rng(OsRng);
     let ephemeral_pk = PublicKey::from(&ephemeral_sk);
 
     let shared = ephemeral_sk.diffie_hellman(recipient_pk);
-    let derived_key = Params::new()
-        .hash_length(32)
-        .hash(shared.as_bytes());
+    let derived_key = Params::new().hash_length(32).hash(shared.as_bytes());
 
     let cipher = XSalsa20Poly1305::new(derived_key.as_bytes().into());
     let nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
-    let ciphertext = cipher.encrypt(&nonce, plaintext).expect("encryption failed");
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext)
+        .expect("encryption failed");
 
     let mut output = Vec::with_capacity(32 + nonce.len() + ciphertext.len());
     output.extend_from_slice(&ephemeral_pk.to_bytes());
@@ -35,9 +35,7 @@ pub fn open(ciphertext: &[u8], recipient_sk: &StaticSecret) -> Result<Vec<u8>, C
     let ephemeral_pk = PublicKey::from(ephemeral_pk_bytes);
 
     let shared = recipient_sk.diffie_hellman(&ephemeral_pk);
-    let derived_key = Params::new()
-        .hash_length(32)
-        .hash(shared.as_bytes());
+    let derived_key = Params::new().hash_length(32).hash(shared.as_bytes());
 
     let nonce_bytes: [u8; 24] = ciphertext[32..56].try_into().unwrap();
     let ct = &ciphertext[56..];

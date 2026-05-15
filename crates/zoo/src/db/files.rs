@@ -1,9 +1,10 @@
+use crate::db::models::FileRecord;
+use crate::error::ZooError;
 use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
-use crate::db::models::FileRecord;
-use crate::error::ZooError;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_file_record(
     pool: &PgPool,
     user_id: Uuid,
@@ -76,23 +77,21 @@ pub async fn list_files_for_sync(
         .bind(limit)
         .fetch_all(pool)
         .await?,
-        None => sqlx::query_as::<_, FileRecord>(
-            "SELECT * FROM files WHERE user_id = $1 AND archived_at IS NULL
+        None => {
+            sqlx::query_as::<_, FileRecord>(
+                "SELECT * FROM files WHERE user_id = $1 AND archived_at IS NULL
              ORDER BY updation_time ASC, id ASC LIMIT $2",
-        )
-        .bind(user_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?,
+            )
+            .bind(user_id)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
     };
     Ok(files)
 }
 
-pub async fn archive_file(
-    pool: &PgPool,
-    user_id: Uuid,
-    file_id: i64,
-) -> Result<(), ZooError> {
+pub async fn archive_file(pool: &PgPool, user_id: Uuid, file_id: i64) -> Result<(), ZooError> {
     sqlx::query(
         "UPDATE files SET archived_at = NOW(), updation_time = NOW()
          WHERE id = $1 AND user_id = $2 AND archived_at IS NULL",

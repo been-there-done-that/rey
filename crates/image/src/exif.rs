@@ -64,7 +64,7 @@ pub fn extract_exif(source: &[u8]) -> ExifData {
 
     if let Some(lat) = exif.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY) {
         if let Some(lat_ref) = exif.get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY) {
-            if let (Some(decimal), Some(ref_str)) = (extract_gps_dms(&lat), extract_ascii(&lat_ref)) {
+            if let (Some(decimal), Some(ref_str)) = (extract_gps_dms(lat), extract_ascii(lat_ref)) {
                 let sign = if ref_str.starts_with('S') { -1.0 } else { 1.0 };
                 data.latitude = Some(decimal * sign);
             }
@@ -73,7 +73,7 @@ pub fn extract_exif(source: &[u8]) -> ExifData {
 
     if let Some(lon) = exif.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY) {
         if let Some(lon_ref) = exif.get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY) {
-            if let (Some(decimal), Some(ref_str)) = (extract_gps_dms(&lon), extract_ascii(&lon_ref)) {
+            if let (Some(decimal), Some(ref_str)) = (extract_gps_dms(lon), extract_ascii(lon_ref)) {
                 let sign = if ref_str.starts_with('W') { -1.0 } else { 1.0 };
                 data.longitude = Some(decimal * sign);
             }
@@ -81,19 +81,20 @@ pub fn extract_exif(source: &[u8]) -> ExifData {
     }
 
     if let Some(dt) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
-        if let Some(dt_str) = extract_ascii(&dt) {
-            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y:%m:%d %H:%M:%S") {
+        if let Some(dt_str) = extract_ascii(dt) {
+            if let Ok(parsed) = chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y:%m:%d %H:%M:%S")
+            {
                 data.taken_at = Some(parsed.and_utc().timestamp_millis());
             }
         }
     }
 
     if let Some(make) = exif.get_field(exif::Tag::Make, exif::In::PRIMARY) {
-        data.device_make = extract_ascii(&make);
+        data.device_make = extract_ascii(make);
     }
 
     if let Some(model) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
-        data.device_model = extract_ascii(&model);
+        data.device_model = extract_ascii(model);
     }
 
     data
@@ -107,7 +108,8 @@ mod tests {
     fn test_extract_exif_no_exif_returns_empty() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(10, 10);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
         let data = extract_exif(&buf);
         assert!(data.latitude.is_none());
         assert!(data.longitude.is_none());

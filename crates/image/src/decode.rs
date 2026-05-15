@@ -1,5 +1,5 @@
-use image::DynamicImage;
 use crate::error::ImageError;
+use image::DynamicImage;
 
 pub fn decode_image(source: &[u8], mime_type: &str) -> Result<DynamicImage, ImageError> {
     let format = match mime_type {
@@ -12,7 +12,9 @@ pub fn decode_image(source: &[u8], mime_type: &str) -> Result<DynamicImage, Imag
 
     let cursor = std::io::Cursor::new(source);
     let reader = image::ImageReader::with_format(cursor, format);
-    reader.decode().map_err(|e| ImageError::DecodeError(e.to_string()))
+    reader
+        .decode()
+        .map_err(|e| ImageError::DecodeError(e.to_string()))
 }
 
 #[cfg(test)]
@@ -23,7 +25,11 @@ mod tests {
     fn test_decode_jpeg() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(10, 10);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
         let decoded = decode_image(&buf, "image/jpeg").unwrap();
         assert_eq!(decoded.width(), 10);
         assert_eq!(decoded.height(), 10);
@@ -33,7 +39,8 @@ mod tests {
     fn test_decode_png() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(20, 15);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
         let decoded = decode_image(&buf, "image/png").unwrap();
         assert_eq!(decoded.width(), 20);
         assert_eq!(decoded.height(), 15);
@@ -43,7 +50,11 @@ mod tests {
     fn test_decode_webp() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(8, 8);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::WebP).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::WebP,
+        )
+        .unwrap();
         let decoded = decode_image(&buf, "image/webp").unwrap();
         assert_eq!(decoded.width(), 8);
         assert_eq!(decoded.height(), 8);

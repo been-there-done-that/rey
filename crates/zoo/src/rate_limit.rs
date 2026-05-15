@@ -41,11 +41,9 @@ impl RateLimiter {
         let cutoff = now - rule.window;
 
         let state_map = self.state.lock().await;
-        let mut state = state_map
-            .entry(key.to_string())
-            .or_insert(RateLimitState {
-                requests: Vec::new(),
-            });
+        let mut state = state_map.entry(key.to_string()).or_insert(RateLimitState {
+            requests: Vec::new(),
+        });
 
         state.requests.retain(|t| *t > cutoff);
 

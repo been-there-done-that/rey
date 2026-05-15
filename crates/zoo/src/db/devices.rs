@@ -1,7 +1,7 @@
-use sqlx::{PgPool, Row};
-use uuid::Uuid;
 use crate::db::models::Device;
 use crate::error::ZooError;
+use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
 pub async fn register_device(
     pool: &PgPool,
@@ -33,7 +33,10 @@ pub async fn register_device(
     Ok(row.get::<Uuid, _>("id"))
 }
 
-pub async fn lookup_by_sse_token(pool: &PgPool, sse_token: &str) -> Result<Option<Device>, ZooError> {
+pub async fn lookup_by_sse_token(
+    pool: &PgPool,
+    sse_token: &str,
+) -> Result<Option<Device>, ZooError> {
     let device = sqlx::query_as::<_, Device>(
         "SELECT * FROM devices WHERE sse_token = $1 AND is_active = TRUE",
     )
@@ -44,31 +47,27 @@ pub async fn lookup_by_sse_token(pool: &PgPool, sse_token: &str) -> Result<Optio
 }
 
 pub async fn tombstone_device(pool: &PgPool, device_id: Uuid) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE devices SET is_active = FALSE WHERE id = $1",
-    )
-    .bind(device_id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE devices SET is_active = FALSE WHERE id = $1")
+        .bind(device_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 pub async fn get_device_stall_timeout(pool: &PgPool, device_id: Uuid) -> Result<i32, ZooError> {
-    let row = sqlx::query(
-        "SELECT stall_timeout_seconds FROM devices WHERE id = $1",
-    )
-    .bind(device_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(|r| r.get::<i32, _>("stall_timeout_seconds")).unwrap_or(90))
+    let row = sqlx::query("SELECT stall_timeout_seconds FROM devices WHERE id = $1")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row
+        .map(|r| r.get::<i32, _>("stall_timeout_seconds"))
+        .unwrap_or(90))
 }
 
 pub async fn update_last_seen(pool: &PgPool, device_id: Uuid) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE devices SET last_seen_at = NOW() WHERE id = $1",
-    )
-    .bind(device_id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE devices SET last_seen_at = NOW() WHERE id = $1")
+        .bind(device_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }

@@ -27,13 +27,17 @@ pub struct ZooConfig {
 impl ZooConfig {
     pub fn from_env() -> Self {
         Self {
-            listen_addr: std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:3002".to_string()),
-            database_url: std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/zoo".to_string()),
+            listen_addr: std::env::var("LISTEN_ADDR")
+                .unwrap_or_else(|_| "0.0.0.0:3002".to_string()),
+            database_url: std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/zoo".to_string()),
             s3_endpoint: std::env::var("S3_ENDPOINT").ok(),
             s3_region: std::env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
             s3_bucket: std::env::var("S3_BUCKET").unwrap_or_else(|_| "rey-files".to_string()),
-            s3_access_key: std::env::var("S3_ACCESS_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
-            s3_secret_key: std::env::var("S3_SECRET_KEY").unwrap_or_else(|_| "minioadmin".to_string()),
+            s3_access_key: std::env::var("S3_ACCESS_KEY")
+                .unwrap_or_else(|_| "minioadmin".to_string()),
+            s3_secret_key: std::env::var("S3_SECRET_KEY")
+                .unwrap_or_else(|_| "minioadmin".to_string()),
             session_ttl: Duration::from_secs(
                 std::env::var("SESSION_TTL_DAYS")
                     .ok()

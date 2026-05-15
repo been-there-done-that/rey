@@ -1,6 +1,6 @@
+use crate::error::MetadataError;
 use types::crypto::{Header24, Key256};
 use types::file::FileMetadata;
-use crate::error::MetadataError;
 
 pub fn decrypt_metadata(
     header: &Header24,
