@@ -1,6 +1,6 @@
-use types::crypto::{Header24, Key256};
 use crate::decrypt::decrypt_thumbnail;
 use crate::error::ThumbnailError;
+use types::crypto::{Header24, Key256};
 
 pub async fn download_thumbnail(
     fetch_encrypted: impl std::future::Future<Output = Result<Vec<u8>, String>> + Send,
@@ -9,7 +9,7 @@ pub async fn download_thumbnail(
 ) -> Result<Vec<u8>, ThumbnailError> {
     let encrypted = fetch_encrypted
         .await
-        .map_err(|e| ThumbnailError::DownloadError(e))?;
+        .map_err(ThumbnailError::DownloadError)?;
 
     let decrypted = decrypt_thumbnail(thumb_header, &encrypted, file_key)?;
 
