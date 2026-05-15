@@ -1,1 +1,5 @@
 tmp/*
+target/
+node_modules/
+pnpm-lock.yaml
+*.sqlx
