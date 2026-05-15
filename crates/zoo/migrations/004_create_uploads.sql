@@ -18,9 +18,11 @@ CREATE TABLE IF NOT EXISTS uploads (
     error_reason        TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at          TIMESTAMPTZ NOT NULL,
-    done_at             TIMESTAMPTZ,
-    UNIQUE (user_id, file_hash, (metadata->>'collection_id')) WHERE status IN ('pending', 'encrypting', 'uploading')
+    done_at             TIMESTAMPTZ
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uploads_dedup ON uploads(user_id, file_hash)
+    WHERE status IN ('pending', 'encrypting', 'uploading');
 
 CREATE INDEX IF NOT EXISTS idx_uploads_user_id ON uploads(user_id);
 CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status);
