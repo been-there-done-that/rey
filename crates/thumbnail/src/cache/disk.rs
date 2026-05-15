@@ -202,4 +202,88 @@ mod tests {
         cache.insert("file2", &[0u8; 200]).unwrap();
         assert_eq!(cache.total_size().unwrap(), 300);
     }
+
+    #[test]
+    fn test_disk_cache_get_nonexistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
+        let result = cache.get("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_disk_cache_remove_nonexistent() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
+        cache.remove("nonexistent").unwrap();
+    }
+
+    #[test]
+    fn test_disk_cache_persists_index_across_reloads() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        {
+            let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
+            cache.insert("persisted", &[1, 2, 3]).unwrap();
+        }
+        {
+            let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
+            let result = cache.get("persisted").unwrap();
+            assert_eq!(result, Some(vec![1, 2, 3]));
+        }
+    }
+
+    #[test]
+    fn test_disk_cache_overwrite_existing() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
+        cache.insert("key", &[1, 2, 3]).unwrap();
+        cache.insert("key", &[4, 5, 6, 7]).unwrap();
+        let result = cache.get("key").unwrap();
+        assert_eq!(result, Some(vec![4, 5, 6, 7]));
+        assert_eq!(cache.total_size().unwrap(), 4);
+    }
+
+    #[test]
+    fn test_disk_cache_eviction_removes_oldest() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
+        let mut cache = DiskCache::new(dir.clone(), 150).unwrap();
+        cache.insert("a", &[0u8; 50]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cache.insert("b", &[0u8; 50]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        cache.insert("c", &[0u8; 50]).unwrap();
+
+        let total = cache.total_size().unwrap();
+        assert!(total <= 150);
+        assert!(cache.index.entries.len() <= 3);
+    }
+
+    #[test]
+    fn test_disk_cache_error_new_invalid_dir() {
+        let invalid_dir = if cfg!(windows) {
+            PathBuf::from("Z:\\\\nonexistent\\\\drive")
+        } else {
+            PathBuf::from("/dev/null/invalid")
+        };
+        let result = DiskCache::new(invalid_dir, 1024);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_disk_cache_error_display() {
+        let err = DiskCacheError::new("test error".to_string());
+        assert_eq!(format!("{}", err), "test error");
+    }
+
+    #[test]
+    fn test_disk_cache_error_debug() {
+        let err = DiskCacheError::new("test error".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("test error"));
+    }
 }

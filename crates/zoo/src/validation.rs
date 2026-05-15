@@ -84,10 +84,22 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_file_size_boundary() {
+        assert!(validate_file_size(0).is_ok());
+        assert!(validate_file_size(MAX_FILE_SIZE).is_ok());
+    }
+
+    #[test]
     fn test_validate_part_size() {
         assert!(validate_part_size(MIN_PART_SIZE as u64).is_ok());
         assert!(validate_part_size((MIN_PART_SIZE - 1) as u64).is_err());
         assert!(validate_part_size(MAX_PART_SIZE + 1).is_err());
+    }
+
+    #[test]
+    fn test_validate_part_size_boundary() {
+        assert!(validate_part_size(MAX_PART_SIZE).is_ok());
+        assert!(validate_part_size(0).is_err());
     }
 
     #[test]
@@ -98,6 +110,11 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_part_count_zero() {
+        assert!(validate_part_count(0).is_ok());
+    }
+
+    #[test]
     fn test_validate_email() {
         assert!(validate_email("test@example.com").is_ok());
         assert!(validate_email("invalid").is_err());
@@ -105,9 +122,55 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_email_too_long() {
+        let long_email = format!("{}@example.com", "a".repeat(250));
+        assert!(validate_email(&long_email).is_err());
+    }
+
+    #[test]
+    fn test_validate_email_at_start() {
+        assert!(validate_email("@example.com").is_ok());
+    }
+
+    #[test]
     fn test_validate_device_name() {
         assert!(validate_device_name("My Phone").is_ok());
         assert!(validate_device_name("").is_err());
         assert!(validate_device_name("name\0with\0null").is_err());
+    }
+
+    #[test]
+    fn test_validate_device_name_too_long() {
+        let long_name = "a".repeat(65);
+        assert!(validate_device_name(&long_name).is_err());
+    }
+
+    #[test]
+    fn test_validate_device_name_max_length() {
+        let max_name = "a".repeat(64);
+        assert!(validate_device_name(&max_name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_part_md5s_empty_when_expected_zero() {
+        assert!(validate_part_md5s(&[], 0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_part_md5s_count_mismatch() {
+        let md5s = vec!["abc".to_string(); 3];
+        assert!(validate_part_md5s(&md5s, 5).is_err());
+    }
+
+    #[test]
+    fn test_validate_part_md5s_invalid_length() {
+        let md5s = vec!["short".to_string()];
+        assert!(validate_part_md5s(&md5s, 1).is_err());
+    }
+
+    #[test]
+    fn test_validate_part_md5s_valid() {
+        let md5s = vec!["d41d8cd98f00b204e9800998ecf8427e".to_string()];
+        assert!(validate_part_md5s(&md5s, 1).is_ok());
     }
 }

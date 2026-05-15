@@ -85,4 +85,34 @@ mod tests {
         cache.insert(2, vec![2]);
         assert_eq!(cache.len(), 2);
     }
+
+    #[test]
+    fn test_memory_cache_is_empty() {
+        let mut cache = MemoryCache::new();
+        assert!(cache.is_empty());
+        cache.insert(1, vec![1]);
+        assert!(!cache.is_empty());
+    }
+
+    #[test]
+    fn test_memory_cache_default() {
+        let cache = MemoryCache::default();
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_memory_cache_get_nonexistent() {
+        let mut cache = MemoryCache::new();
+        assert!(cache.get(&999).is_none());
+    }
+
+    #[test]
+    fn test_memory_cache_overwrite() {
+        let mut cache = MemoryCache::with_capacity(10);
+        cache.insert(1, vec![1, 2, 3]);
+        cache.insert(1, vec![4, 5, 6]);
+        assert_eq!(cache.get(&1), Some(vec![4, 5, 6]));
+        assert_eq!(cache.len(), 1);
+    }
 }

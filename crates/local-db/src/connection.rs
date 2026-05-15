@@ -123,4 +123,54 @@ mod tests {
         let result = LocalDb::open_with_key(&db_path, &key2);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_open_with_key_creates_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("sub").join("dir");
+        let db_path = nested.join("test.db");
+        let key = [7u8; 32];
+        let _db = LocalDb::open_with_key(&db_path, &key).unwrap();
+        assert!(db_path.exists());
+        assert!(nested.exists());
+    }
+
+    #[test]
+    fn test_open_test_disables_foreign_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let db = LocalDb::open_test(&db_path).unwrap();
+
+        let fk_status: i32 = db
+            .conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk_status, 0);
+    }
+
+    #[test]
+    fn test_database_persists_across_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let key = [3u8; 32];
+
+        {
+            let db = LocalDb::open_with_key(&db_path, &key).unwrap();
+            db.conn
+                .execute("CREATE TABLE test (id INTEGER PRIMARY KEY)", [])
+                .unwrap();
+            db.conn
+                .execute("INSERT INTO test (id) VALUES (1)", [])
+                .unwrap();
+        }
+
+        {
+            let db = LocalDb::open_with_key(&db_path, &key).unwrap();
+            let count: i32 = db
+                .conn
+                .query_row("SELECT COUNT(*) FROM test", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1);
+        }
+    }
 }
