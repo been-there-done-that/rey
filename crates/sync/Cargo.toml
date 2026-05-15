@@ -6,3 +6,21 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+types = { workspace = true }
+crypto = { workspace = true }
+metadata = { workspace = true }
+thumbnail = { workspace = true }
+local-db = { workspace = true }
+common = { workspace = true }
+zoo-client = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }
