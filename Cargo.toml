@@ -33,7 +33,7 @@ blake2b_simd = "1"
 chacha20poly1305 = "0.10"
 xsalsa20poly1305 = "0.9"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
-zeroize = "1"
+zeroize = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 bcrypt = "0.15"
 lru = "0.12"
