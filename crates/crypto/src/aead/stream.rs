@@ -1,18 +1,24 @@
-use alloc::vec::Vec;
+use crate::error::CryptoError;
 use aead::{Aead, AeadCore, KeyInit};
+use alloc::vec::Vec;
 use chacha20poly1305::XChaCha20Poly1305;
 use rand_core::OsRng;
 use types::crypto::{Header24, Key256};
-use crate::error::CryptoError;
 
 pub fn stream_encrypt(plaintext: &[u8], key: &Key256) -> (Header24, Vec<u8>) {
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     let header = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let ciphertext = cipher.encrypt(&header, plaintext).expect("encryption failed");
+    let ciphertext = cipher
+        .encrypt(&header, plaintext)
+        .expect("encryption failed");
     (Header24::new(header.into()), ciphertext)
 }
 
-pub fn stream_decrypt(header: &Header24, ciphertext: &[u8], key: &Key256) -> Result<Vec<u8>, CryptoError> {
+pub fn stream_decrypt(
+    header: &Header24,
+    ciphertext: &[u8],
+    key: &Key256,
+) -> Result<Vec<u8>, CryptoError> {
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     cipher
         .decrypt(header.as_bytes().into(), ciphertext)

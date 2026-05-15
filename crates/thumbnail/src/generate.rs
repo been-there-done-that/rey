@@ -1,5 +1,5 @@
-use types::crypto::{Header24, Key256};
 use crate::error::ThumbnailError;
+use types::crypto::{Header24, Key256};
 
 const MAX_DIMENSION: u32 = 720;
 const MAX_SIZE_BYTES: usize = 100 * 1024;
@@ -50,7 +50,11 @@ mod tests {
     fn thumbnail_from_jpeg_is_within_specs() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(1920, 1080);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
         let key = generate_key();
         let (_, ciphertext) = generate_thumbnail(&buf, "image/jpeg", &key).unwrap();
         assert!(ciphertext.len() <= MAX_SIZE_BYTES + 16);
@@ -76,7 +80,11 @@ mod tests {
     fn small_image_no_resize_needed() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(100, 100);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg).unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
         let key = generate_key();
         let (_, ciphertext) = generate_thumbnail(&buf, "image/jpeg", &key).unwrap();
         assert!(!ciphertext.is_empty());

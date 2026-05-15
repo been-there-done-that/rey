@@ -1,10 +1,10 @@
-pub mod crypto;
-pub mod file;
 pub mod collection;
+pub mod crypto;
+pub mod device;
+pub mod error;
+pub mod file;
+pub mod share;
+pub mod sse;
 pub mod sync;
 pub mod upload;
-pub mod sse;
-pub mod device;
-pub mod share;
 pub mod user;
-pub mod error;

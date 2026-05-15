@@ -1,8 +1,12 @@
+use crate::error::CryptoError;
 use argon2::{Algorithm, Argon2, Params, Version};
 use types::crypto::{Argon2Profile, Key256, Salt16};
-use crate::error::CryptoError;
 
-pub fn derive_kek(password: &[u8], salt: &Salt16, profile: Argon2Profile) -> Result<Key256, CryptoError> {
+pub fn derive_kek(
+    password: &[u8],
+    salt: &Salt16,
+    profile: Argon2Profile,
+) -> Result<Key256, CryptoError> {
     let mut mem = profile.mem_limit();
     let mut ops = profile.ops_limit();
     let floor = 32 * 1024 * 1024; // 32 MiB
@@ -12,7 +16,8 @@ pub fn derive_kek(password: &[u8], salt: &Salt16, profile: Argon2Profile) -> Res
         let t_cost = ops;
         let p_cost = 1;
 
-        let params = Params::new(m_cost, t_cost, p_cost, None).map_err(|_| CryptoError::InvalidKey)?;
+        let params =
+            Params::new(m_cost, t_cost, p_cost, None).map_err(|_| CryptoError::InvalidKey)?;
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
         let mut output = [0u8; 32];

@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use crate::collection::EncryptedCollection;
 use crate::file::EncryptedFileRecord;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncCollectionResponse {

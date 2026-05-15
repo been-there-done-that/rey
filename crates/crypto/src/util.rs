@@ -1,8 +1,8 @@
+use crate::error::CryptoError;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use subtle::ConstantTimeEq;
-use crate::error::CryptoError;
 
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

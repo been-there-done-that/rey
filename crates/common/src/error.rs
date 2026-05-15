@@ -1,5 +1,5 @@
-use thiserror::Error;
 use crate::config::ConfigError;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum CommonError {
@@ -83,10 +83,7 @@ mod tests {
 
     #[test]
     fn test_format_error_chain_multi_level() {
-        let io_err = io::Error::new(
-            io::ErrorKind::NotFound,
-            "No such file or directory",
-        );
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "No such file or directory");
         let parse_err = CommonError::Parse(format!("config load failed: {io_err}"));
 
         let output = format_error_chain(&parse_err);
