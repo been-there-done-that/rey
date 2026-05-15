@@ -152,7 +152,10 @@ mod tests {
         assert_eq!(config.listen_addr, "127.0.0.1:8080");
         assert_eq!(config.s3_region, "eu-west-1");
         assert_eq!(config.s3_bucket, "my-bucket");
-        assert_eq!(config.s3_endpoint, Some("http://localhost:9000".to_string()));
+        assert_eq!(
+            config.s3_endpoint,
+            Some("http://localhost:9000".to_string())
+        );
         assert_eq!(config.session_ttl, Duration::from_secs(7 * 86400));
         assert_eq!(config.stall_timeout, Duration::from_secs(120));
         assert_eq!(config.gc_interval, Duration::from_secs(600));

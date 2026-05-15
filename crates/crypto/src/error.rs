@@ -52,10 +52,7 @@ mod tests {
     #[test]
     fn test_display_allocation_failed() {
         let err = CryptoError::AllocationFailed;
-        assert_eq!(
-            format!("{}", err),
-            "memory allocation failed for Argon2id"
-        );
+        assert_eq!(format!("{}", err), "memory allocation failed for Argon2id");
     }
 
     #[test]

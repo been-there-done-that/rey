@@ -145,8 +145,11 @@ mod tests {
     fn test_extract_exif_jpeg_without_exif() {
         let mut buf = Vec::new();
         let img = image::DynamicImage::new_rgb8(100, 100);
-        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
-            .unwrap();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
         let data = extract_exif(&buf);
         assert!(data.orientation.is_none());
         assert!(data.latitude.is_none());
