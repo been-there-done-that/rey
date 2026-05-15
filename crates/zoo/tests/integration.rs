@@ -1,7 +1,6 @@
 use reqwest::Client;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::env;
 use std::process::{Child, Command};
 use std::time::Duration;
 use uuid::Uuid;
@@ -20,72 +19,56 @@ fn test_db_url() -> String {
     format!("postgres://postgres:postgres@localhost/{}", TEST_DB)
 }
 
-fn ensure_test_db() {
-    let output = Command::new("psql")
-        .args([
-            "-h", "localhost",
-            "-U", "postgres",
-            "-c",
-            &format!("SELECT 1 FROM pg_database WHERE datname = '{}'", TEST_DB),
-        ])
-        .env("PGPASSWORD", "postgres")
-        .output()
-        .expect("failed to check database");
+async fn ensure_test_db() {
+    let default_url = "postgres://postgres:postgres@localhost/postgres";
+    let default_pool = sqlx::PgPool::connect(default_url)
+        .await
+        .expect("failed to connect to default postgres database");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.contains("(1 row)") {
-        Command::new("psql")
-            .args([
-                "-h", "localhost",
-                "-U", "postgres",
-                "-c",
-                &format!("CREATE DATABASE {}", TEST_DB),
-            ])
-            .env("PGPASSWORD", "postgres")
-            .output()
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)",
+    )
+    .bind(TEST_DB)
+    .fetch_one(&default_pool)
+    .await
+    .expect("failed to check database existence");
+
+    if !exists {
+        sqlx::query(&format!("CREATE DATABASE {}", TEST_DB))
+            .execute(&default_pool)
+            .await
             .expect("failed to create test database");
     }
 
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let migrations_dir = std::path::Path::new(&manifest_dir)
-        .join("migrations");
+    default_pool.close().await;
 
-    for entry in std::fs::read_dir(&migrations_dir).expect("migrations dir not found") {
-        let entry = entry.expect("failed to read entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("sql") {
-            Command::new("psql")
-                .args([
-                    "-h", "localhost",
-                    "-U", "postgres",
-                    "-d", TEST_DB,
-                    "-f",
-                    path.to_str().unwrap(),
-                ])
-                .env("PGPASSWORD", "postgres")
-                .output()
-                .expect("failed to run migration");
-        }
-    }
+    let test_pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect to test database");
+
+    sqlx::migrate!("./migrations")
+        .run(&test_pool)
+        .await
+        .expect("failed to run migrations");
+
+    test_pool.close().await;
 }
 
-fn clean_test_db() {
+async fn clean_test_db() {
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect to test database for cleanup");
+
     let tables = [
         "shares", "files", "upload_parts", "uploads", "devices", "sessions", "users",
     ];
     for table in &tables {
-        Command::new("psql")
-            .args([
-                "-h", "localhost",
-                "-U", "postgres",
-                "-d", TEST_DB,
-                "-c",
-                &format!("TRUNCATE {} CASCADE", table),
-            ])
-            .env("PGPASSWORD", "postgres")
-            .output()
-            .ok();
+        let _ = sqlx::query(&format!("TRUNCATE {} CASCADE", table))
+            .execute(&pool)
+            .await;
     }
+
+    pool.close().await;
 }
 
 struct TestServer {
@@ -148,7 +131,7 @@ static SERVER: OnceCell<TestServer> = OnceCell::const_new();
 
 async fn get_server() -> &'static TestServer {
     SERVER.get_or_init(|| async {
-        ensure_test_db();
+        ensure_test_db().await;
         let server = TestServer::new(TEST_PORT);
         server.wait_for_ready(30).await;
         server
@@ -257,7 +240,7 @@ async fn create_upload(client: &Client, token: &str, device_id: &str, file_hash:
 }
 
 async fn setup_user() -> (Client, String, String, serde_json::Value) {
-    clean_test_db();
+    clean_test_db().await;
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
     register_test_user(&client, &email).await;
@@ -270,7 +253,7 @@ async fn setup_user() -> (Client, String, String, serde_json::Value) {
 #[tokio::test]
 async fn test_auth_register_and_login() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -302,7 +285,7 @@ async fn test_auth_login_wrong_credentials() {
 #[tokio::test]
 async fn test_auth_login_params() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -347,7 +330,7 @@ async fn test_auth_login_params_nonexistent_user() {
 #[tokio::test]
 async fn test_auth_logout() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -383,7 +366,7 @@ async fn test_auth_logout_invalid_token() {
 #[tokio::test]
 async fn test_device_register_and_list() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -399,7 +382,7 @@ async fn test_device_register_and_list() {
 #[tokio::test]
 async fn test_device_deregister() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -422,7 +405,7 @@ async fn test_device_deregister() {
 #[tokio::test]
 async fn test_device_heartbeat() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -445,7 +428,7 @@ async fn test_device_heartbeat() {
 #[tokio::test]
 async fn test_device_empty_name() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -470,7 +453,7 @@ async fn test_device_empty_name() {
 #[tokio::test]
 async fn test_device_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -491,7 +474,7 @@ async fn test_device_not_found() {
 #[tokio::test]
 async fn test_upload_create() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -505,7 +488,7 @@ async fn test_upload_create() {
 #[tokio::test]
 async fn test_upload_get_status() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -529,7 +512,7 @@ async fn test_upload_get_status() {
 #[tokio::test]
 async fn test_upload_heartbeat() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -551,7 +534,7 @@ async fn test_upload_heartbeat() {
 #[tokio::test]
 async fn test_upload_complete() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -595,7 +578,7 @@ async fn test_upload_complete() {
 #[tokio::test]
 async fn test_upload_fail() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -618,7 +601,7 @@ async fn test_upload_fail() {
 #[tokio::test]
 async fn test_upload_dedup() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -664,7 +647,7 @@ async fn test_upload_dedup() {
 #[tokio::test]
 async fn test_upload_cancel() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -696,7 +679,7 @@ async fn test_upload_cancel() {
 #[tokio::test]
 async fn test_upload_patch_status() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -729,7 +712,7 @@ async fn test_upload_patch_status() {
 #[tokio::test]
 async fn test_upload_patch_invalid_transition() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -752,7 +735,7 @@ async fn test_upload_patch_invalid_transition() {
 #[tokio::test]
 async fn test_upload_presign() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -780,7 +763,7 @@ async fn test_upload_presign() {
 #[tokio::test]
 async fn test_upload_presign_refresh() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -805,7 +788,7 @@ async fn test_upload_presign_refresh() {
 #[tokio::test]
 async fn test_upload_register_file() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -861,7 +844,7 @@ async fn test_upload_register_file() {
 #[tokio::test]
 async fn test_upload_list_pending() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -901,7 +884,7 @@ async fn test_upload_list_pending() {
 #[tokio::test]
 async fn test_upload_confirm_part() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -924,7 +907,7 @@ async fn test_upload_confirm_part() {
 #[tokio::test]
 async fn test_upload_missing_device_header() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -951,7 +934,7 @@ async fn test_upload_missing_device_header() {
 #[tokio::test]
 async fn test_upload_invalid_device_id_format() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -979,7 +962,7 @@ async fn test_upload_invalid_device_id_format() {
 #[tokio::test]
 async fn test_upload_file_too_large() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1006,7 +989,7 @@ async fn test_upload_file_too_large() {
 #[tokio::test]
 async fn test_upload_part_count_exceeded() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1033,7 +1016,7 @@ async fn test_upload_part_count_exceeded() {
 #[tokio::test]
 async fn test_upload_part_size_too_small() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1060,7 +1043,7 @@ async fn test_upload_part_size_too_small() {
 #[tokio::test]
 async fn test_upload_part_md5s_count_mismatch() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1087,7 +1070,7 @@ async fn test_upload_part_md5s_count_mismatch() {
 #[tokio::test]
 async fn test_upload_part_md5_invalid_length() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1114,7 +1097,7 @@ async fn test_upload_part_md5_invalid_length() {
 #[tokio::test]
 async fn test_upload_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 
@@ -1131,7 +1114,7 @@ async fn test_upload_not_found() {
 #[tokio::test]
 async fn test_upload_forbidden_access() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1163,7 +1146,7 @@ async fn test_upload_forbidden_access() {
 #[tokio::test]
 async fn test_upload_cancel_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1195,7 +1178,7 @@ async fn test_upload_cancel_forbidden() {
 #[tokio::test]
 async fn test_upload_patch_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1228,7 +1211,7 @@ async fn test_upload_patch_forbidden() {
 #[tokio::test]
 async fn test_upload_presign_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1263,7 +1246,7 @@ async fn test_upload_presign_forbidden() {
 #[tokio::test]
 async fn test_upload_presign_refresh_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1295,7 +1278,7 @@ async fn test_upload_presign_refresh_forbidden() {
 #[tokio::test]
 async fn test_upload_register_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1334,7 +1317,7 @@ async fn test_upload_register_forbidden() {
 #[tokio::test]
 async fn test_upload_complete_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1366,7 +1349,7 @@ async fn test_upload_complete_forbidden() {
 #[tokio::test]
 async fn test_device_forbidden_access() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1392,7 +1375,7 @@ async fn test_device_forbidden_access() {
 #[tokio::test]
 async fn test_sync_files() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1418,7 +1401,7 @@ async fn test_sync_files() {
 #[tokio::test]
 async fn test_sync_files_with_since() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1442,7 +1425,7 @@ async fn test_sync_files_with_since() {
 #[tokio::test]
 async fn test_sse_events() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1470,7 +1453,7 @@ async fn test_sse_events() {
 #[tokio::test]
 async fn test_sse_test_event() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1506,7 +1489,7 @@ async fn test_unauthorized_access() {
 #[tokio::test]
 async fn test_validation_email_empty() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
 
@@ -1536,7 +1519,7 @@ async fn test_validation_email_empty() {
 #[tokio::test]
 async fn test_file_download_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 
@@ -1553,7 +1536,7 @@ async fn test_file_download_not_found() {
 #[tokio::test]
 async fn test_file_archive_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 
