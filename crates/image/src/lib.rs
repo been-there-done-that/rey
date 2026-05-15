@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod decode;
+pub mod encode;
+pub mod exif;
+pub mod orientation;
+pub mod resize;
+pub mod error;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use decode::decode_image;
+pub use encode::encode_jpeg;
+pub use exif::{extract_exif, ExifData};
+pub use orientation::apply_orientation;
+pub use resize::resize_max_dimension;
+pub use error::ImageError;
