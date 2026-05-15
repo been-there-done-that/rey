@@ -109,6 +109,9 @@ impl AppConfigFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn clear_env() {
         env::remove_var("REY_SERVER_URL");
@@ -119,6 +122,7 @@ mod tests {
 
     #[test]
     fn test_from_env_uses_defaults_when_no_vars_set() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         clear_env();
 
         let config = AppConfig::from_env();
@@ -130,39 +134,38 @@ mod tests {
 
     #[test]
     fn test_from_env_reads_server_url() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         clear_env();
         env::set_var("REY_SERVER_URL", "https://api.example.com");
 
         let config = AppConfig::from_env();
         assert_eq!(config.server_url, "https://api.example.com");
-
-        clear_env();
     }
 
     #[test]
     fn test_from_env_reads_log_level() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         clear_env();
         env::set_var("REY_LOG_LEVEL", "debug");
 
         let config = AppConfig::from_env();
         assert_eq!(config.log_level, "debug");
-
-        clear_env();
     }
 
     #[test]
     fn test_from_env_reads_db_path() {
+        let _guard = ENV_MUTEX.lock().unwrap();
         clear_env();
         env::set_var("REY_DB_PATH", "/tmp/test.db");
 
         let config = AppConfig::from_env();
         assert_eq!(config.db_path, PathBuf::from("/tmp/test.db"));
-
-        clear_env();
     }
 
     #[test]
     fn test_from_file_json() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_env();
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join("test_config.json");
         let content = r#"{
@@ -180,6 +183,8 @@ mod tests {
 
     #[test]
     fn test_from_file_toml() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        clear_env();
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join("test_config.toml");
         let content = r#"

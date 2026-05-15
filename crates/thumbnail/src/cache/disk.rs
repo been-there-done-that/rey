@@ -161,52 +161,46 @@ impl DiskCache {
 mod tests {
     use super::*;
 
-    fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("thumb_disk_test_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
-
     #[test]
     fn test_disk_cache_insert_and_get() {
-        let dir = temp_dir();
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
         let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
         cache.insert("file1", &[1, 2, 3]).unwrap();
         let result = cache.get("file1").unwrap();
         assert_eq!(result, Some(vec![1, 2, 3]));
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_disk_cache_remove() {
-        let dir = temp_dir();
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
         let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
         cache.insert("file1", &[1, 2, 3]).unwrap();
         cache.remove("file1").unwrap();
         let result = cache.get("file1").unwrap();
         assert!(result.is_none());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_disk_cache_eviction() {
-        let dir = temp_dir();
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
         let mut cache = DiskCache::new(dir.clone(), 100).unwrap();
         cache.insert("file1", &[0u8; 50]).unwrap();
         cache.insert("file2", &[0u8; 50]).unwrap();
-        cache.insert("file3", &[0u8; 50]).unwrap(); // should trigger eviction
+        cache.insert("file3", &[0u8; 50]).unwrap();
         let total = cache.total_size().unwrap();
         assert!(total <= 100);
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_disk_cache_total_size() {
-        let dir = temp_dir();
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().to_path_buf();
         let mut cache = DiskCache::new(dir.clone(), 1024 * 1024).unwrap();
         cache.insert("file1", &[0u8; 100]).unwrap();
         cache.insert("file2", &[0u8; 200]).unwrap();
         assert_eq!(cache.total_size().unwrap(), 300);
-        let _ = fs::remove_dir_all(&dir);
     }
 }

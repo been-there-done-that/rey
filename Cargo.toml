@@ -71,6 +71,7 @@ aead = "0.5"
 common = { path = "crates/common" }
 rey-image = { path = "crates/image" }
 crypto = { path = "crates/crypto" }
+metadata = { path = "crates/metadata" }
 chrono = "0.4"
 
 [profile.dev.package.crypto]
