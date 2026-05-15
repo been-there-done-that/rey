@@ -48,8 +48,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace"] }
-aws-sdk-s3 = "1"
-aws-config = "1"
+aws-sdk-s3 = { version = "=1.38.0" }
+aws-config = { version = "=1.4.0" }
 utoipa = { version = "4", features = ["axum_extras"] }
 tauri = { version = "2", features = [] }
 tauri-specta = { version = "2", features = ["derive", "typescript"] }
@@ -69,7 +69,7 @@ types = { path = "crates/types" }
 subtle = "2.5"
 aead = "0.5"
 getrandom = "0.2"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 common = { path = "crates/common" }
 rey-image = { path = "crates/image" }
