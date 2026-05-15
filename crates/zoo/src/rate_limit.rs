@@ -100,4 +100,72 @@ mod tests {
         let result = limiter.check("test").await;
         assert!(result.is_err());
     }
+
+    #[tokio::test]
+    async fn test_rate_limiter_no_rule_allows_all() {
+        let limiter = RateLimiter::new();
+        for _ in 0..100 {
+            assert!(limiter.check("unknown").await.is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_rejects_with_retry_duration() {
+        let limiter = RateLimiter::new();
+        limiter.add_rule(
+            "strict".to_string(),
+            RateLimitRule {
+                max_requests: 1,
+                window: Duration::from_secs(10),
+            },
+        );
+
+        assert!(limiter.check("strict").await.is_ok());
+        let result = limiter.check("strict").await;
+        assert!(result.is_err());
+        let retry_after = result.unwrap_err();
+        assert!(retry_after <= Duration::from_secs(10));
+        assert!(retry_after > Duration::from_secs(0));
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_different_keys_independent() {
+        let limiter = RateLimiter::new();
+        limiter.add_rule(
+            "user1".to_string(),
+            RateLimitRule {
+                max_requests: 1,
+                window: Duration::from_secs(60),
+            },
+        );
+        limiter.add_rule(
+            "user2".to_string(),
+            RateLimitRule {
+                max_requests: 1,
+                window: Duration::from_secs(60),
+            },
+        );
+
+        assert!(limiter.check("user1").await.is_ok());
+        assert!(limiter.check("user2").await.is_ok());
+        assert!(limiter.check("user1").await.is_err());
+        assert!(limiter.check("user2").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_default() {
+        let limiter = RateLimiter::default();
+        assert!(limiter.check("any").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_rule_clone() {
+        let rule = RateLimitRule {
+            max_requests: 5,
+            window: Duration::from_secs(30),
+        };
+        let cloned = rule.clone();
+        assert_eq!(cloned.max_requests, 5);
+        assert_eq!(cloned.window, Duration::from_secs(30));
+    }
 }

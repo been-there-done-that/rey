@@ -118,4 +118,49 @@ mod tests {
         assert!(data.device_model.is_none());
         assert!(data.orientation.is_none());
     }
+
+    #[test]
+    fn test_extract_exif_empty_bytes_returns_empty() {
+        let data = extract_exif(&[]);
+        assert!(data.latitude.is_none());
+        assert!(data.longitude.is_none());
+        assert!(data.taken_at.is_none());
+        assert!(data.device_make.is_none());
+        assert!(data.device_model.is_none());
+        assert!(data.orientation.is_none());
+    }
+
+    #[test]
+    fn test_extract_exif_invalid_bytes_returns_empty() {
+        let data = extract_exif(b"not a valid image at all");
+        assert!(data.latitude.is_none());
+        assert!(data.longitude.is_none());
+        assert!(data.taken_at.is_none());
+        assert!(data.device_make.is_none());
+        assert!(data.device_model.is_none());
+        assert!(data.orientation.is_none());
+    }
+
+    #[test]
+    fn test_extract_exif_jpeg_without_exif() {
+        let mut buf = Vec::new();
+        let img = image::DynamicImage::new_rgb8(100, 100);
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .unwrap();
+        let data = extract_exif(&buf);
+        assert!(data.orientation.is_none());
+        assert!(data.latitude.is_none());
+        assert!(data.taken_at.is_none());
+    }
+
+    #[test]
+    fn test_exif_data_empty_constructor() {
+        let data = ExifData::empty();
+        assert!(data.latitude.is_none());
+        assert!(data.longitude.is_none());
+        assert!(data.taken_at.is_none());
+        assert!(data.device_make.is_none());
+        assert!(data.device_model.is_none());
+        assert!(data.orientation.is_none());
+    }
 }

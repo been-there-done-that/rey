@@ -74,12 +74,82 @@ mod tests {
     }
 
     #[test]
+    fn test_subscribe_returns_new_receiver_each_time() {
+        let hub = SseHub::new();
+        let mut rx1 = hub.subscribe("user-1");
+        let mut rx2 = hub.subscribe("user-1");
+
+        let event = SseEvent::Heartbeat {
+            timestamp: 1700000000000,
+        };
+        hub.broadcast("user-1", event.clone());
+
+        assert!(rx1.try_recv().is_ok());
+        assert!(rx2.try_recv().is_ok());
+    }
+
+    #[test]
+    fn test_broadcast_to_nonexistent_user_does_not_panic() {
+        let hub = SseHub::new();
+        let event = SseEvent::Heartbeat {
+            timestamp: 1700000000000,
+        };
+        hub.broadcast("nonexistent", event);
+    }
+
+    #[test]
+    fn test_sender_count_returns_zero_for_unknown_user() {
+        let hub = SseHub::new();
+        assert_eq!(hub.sender_count("unknown"), 0);
+    }
+
+    #[test]
+    fn test_sender_count_returns_receiver_count() {
+        let hub = SseHub::new();
+        let _rx1 = hub.subscribe("user-1");
+        let _rx2 = hub.subscribe("user-1");
+        assert_eq!(hub.sender_count("user-1"), 2);
+    }
+
+    #[test]
     #[ignore = "broadcast channel receiver_count has race condition in sync tests"]
     fn test_cleanup_if_empty() {
         let hub = SseHub::new();
-        let _rx = hub.subscribe("user-1");
-        drop(_rx);
+        let rx = hub.subscribe("user-1");
+        drop(rx);
+        tokio::task::block_in_place(|| {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        });
         hub.cleanup_if_empty("user-1");
-        assert!(hub.senders.get("user-1").is_none());
+        assert!(hub.sender_count("user-1") == 0);
+    }
+
+    #[test]
+    fn test_cleanup_does_not_remove_active_channel() {
+        let hub = SseHub::new();
+        let _rx = hub.subscribe("user-1");
+        hub.cleanup_if_empty("user-1");
+        assert_eq!(hub.sender_count("user-1"), 1);
+    }
+
+    #[test]
+    fn test_default_creates_new_hub() {
+        let hub = SseHub::default();
+        assert_eq!(hub.sender_count("any"), 0);
+    }
+
+    #[test]
+    fn test_broadcast_to_wrong_user_not_received() {
+        let hub = SseHub::new();
+        let mut rx1 = hub.subscribe("user-1");
+        let mut rx2 = hub.subscribe("user-2");
+
+        let event = SseEvent::Heartbeat {
+            timestamp: 1700000000000,
+        };
+        hub.broadcast("user-1", event);
+
+        assert!(rx1.try_recv().is_ok());
+        assert!(rx2.try_recv().is_err());
     }
 }

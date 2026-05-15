@@ -15,3 +15,43 @@ pub async fn download_thumbnail(
 
     Ok(decrypted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crypto::key::generate_key;
+    use crypto::stream_encrypt;
+
+    #[tokio::test]
+    async fn test_download_thumbnail_success() {
+        let key = generate_key();
+        let plaintext = b"downloaded thumbnail";
+        let (header, ciphertext) = stream_encrypt(plaintext, &key);
+
+        let fetcher = async move { Ok(ciphertext) };
+        let result = download_thumbnail(fetcher, &header, &key).await.unwrap();
+        assert_eq!(result, plaintext);
+    }
+
+    #[tokio::test]
+    async fn test_download_thumbnail_fetch_error() {
+        let key = generate_key();
+        let header = Header24::new([0u8; 24]);
+
+        let fetcher = async move { Err("network error".to_string()) };
+        let result = download_thumbnail(fetcher, &header, &key).await;
+        assert!(matches!(result, Err(ThumbnailError::DownloadError(_))));
+    }
+
+    #[tokio::test]
+    async fn test_download_thumbnail_decrypt_error() {
+        let key = generate_key();
+        let wrong_key = generate_key();
+        let plaintext = b"thumbnail data";
+        let (header, ciphertext) = stream_encrypt(plaintext, &key);
+
+        let fetcher = async move { Ok(ciphertext) };
+        let result = download_thumbnail(fetcher, &header, &wrong_key).await;
+        assert!(matches!(result, Err(ThumbnailError::Crypto(_))));
+    }
+}
