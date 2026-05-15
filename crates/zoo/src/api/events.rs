@@ -1,3 +1,4 @@
+use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::Event;
@@ -7,32 +8,28 @@ use futures::{Stream, StreamExt};
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
-use types::error::{ApiError, ErrorCode, ErrorResponse};
+use types::error::ErrorResponse;
 use types::sse::SseEvent;
 use uuid::Uuid;
-use crate::state::AppState;
 
 pub async fn sse_stream(
     State(state): State<AppState>,
     axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
-) -> Result<
-    Sse<impl Stream<Item = Result<Event, Infallible>>>,
-    (StatusCode, Json<ErrorResponse>),
-> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, Json<ErrorResponse>)> {
     let rx = state.sse_hub.subscribe(&user_id.to_string());
 
     let stream = BroadcastStream::new(rx)
         .filter_map(|result| async move {
             match result {
-                Ok(event) => {
-                    serde_json::to_string(&event)
-                        .ok()
-                        .map(|json| Ok(Event::default().data(json)))
-                }
+                Ok(event) => serde_json::to_string(&event)
+                    .ok()
+                    .map(|json| Ok(Event::default().data(json))),
                 Err(_) => None,
             }
         })
-        .chain(tokio_stream::once(Ok(Event::default().data("connection closed"))));
+        .chain(tokio_stream::once(Ok(
+            Event::default().data("connection closed")
+        )));
 
     Ok(Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()

@@ -1,3 +1,5 @@
+use crate::db::files::list_files_for_sync;
+use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
@@ -5,8 +7,6 @@ use types::error::{ApiError, ErrorCode, ErrorResponse};
 use types::file::EncryptedFileRecord;
 use types::sync::SyncFilesResponse;
 use uuid::Uuid;
-use crate::db::files::list_files_for_sync;
-use crate::state::AppState;
 
 pub async fn sync_files(
     State(state): State<AppState>,
@@ -22,7 +22,7 @@ pub async fn sync_files(
 
     let files = list_files_for_sync(&state.pool, user_id, since, limit)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     let latest_updated_at = files
         .last()

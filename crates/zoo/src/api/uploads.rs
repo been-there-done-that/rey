@@ -1,18 +1,23 @@
+use crate::db::files::insert_file_record;
+use crate::db::upload_parts::{insert_parts_batch, mark_part_uploaded};
+use crate::db::uploads::{
+    create_upload, get_upload, patch_upload_status, update_bitmask, update_heartbeat,
+    update_s3_info,
+};
+use crate::error::ZooError;
+use crate::s3::presigner::{build_complete_url, presign_part_upload};
+use crate::state::{validate_transition, AppState};
+use crate::types::{RegisterRequest, UploadRequest};
+use crate::validation::{
+    validate_file_size, validate_part_count, validate_part_md5s, validate_part_size,
+};
 use axum::extract::State;
-use axum::http::{StatusCode, HeaderValue};
+use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 use types::error::{ApiError, ErrorCode, ErrorResponse};
 use types::upload::{UploadState, UploadStatus};
 use uuid::Uuid;
-use crate::db::files::insert_file_record;
-use crate::db::upload_parts::{insert_parts_batch, mark_part_uploaded};
-use crate::db::uploads::{create_upload, get_upload, patch_upload_status, update_bitmask, update_heartbeat, update_s3_info};
-use crate::error::ZooError;
-use crate::s3::presigner::{presign_part_upload, build_complete_url};
-use crate::state::{AppState, validate_transition};
-use crate::types::{RegisterRequest, UploadRequest};
-use crate::validation::{validate_file_size, validate_part_count, validate_part_md5s, validate_part_size};
 
 pub async fn create(
     State(state): State<AppState>,
@@ -31,7 +36,8 @@ pub async fn create(
     validate_file_size(req.file_size as u64).map_err(|e| validation_error(e.to_string()))?;
     validate_part_size(req.part_size as u64).map_err(|e| validation_error(e.to_string()))?;
     validate_part_count(req.part_count).map_err(|e| validation_error(e.to_string()))?;
-    validate_part_md5s(&req.part_md5s, req.part_count).map_err(|e| validation_error(e.to_string()))?;
+    validate_part_md5s(&req.part_md5s, req.part_count)
+        .map_err(|e| validation_error(e.to_string()))?;
 
     let expires_at = Utc::now() + chrono::Duration::hours(24);
 
@@ -70,7 +76,7 @@ pub async fn create(
 
     insert_parts_batch(&state.pool, upload_id, &parts)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     let object_key = format!("{}/{}", user_id, upload_id);
 
@@ -82,7 +88,7 @@ pub async fn create(
         state.config.presigned_ttl,
     )
     .await
-    .map_err(|e| internal_error(e))?;
+    .map_err(internal_error)?;
 
     let complete_url = build_complete_url(
         &state.s3_client,
@@ -91,7 +97,8 @@ pub async fn create(
         &presigned_urls.upload_id_s3,
     );
 
-    let urls_expire_at = Utc::now() + chrono::Duration::from_std(state.config.presigned_ttl).unwrap();
+    let urls_expire_at =
+        Utc::now() + chrono::Duration::from_std(state.config.presigned_ttl).unwrap();
 
     update_s3_info(
         &state.pool,
@@ -101,18 +108,20 @@ pub async fn create(
         urls_expire_at,
     )
     .await
-    .map_err(|e| internal_error(e))?;
+    .map_err(internal_error)?;
 
     patch_upload_status(&state.pool, upload_id, "pending")
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
-    let bitmask_bytes = vec![0u8; ((req.part_count as usize + 7) / 8) as usize];
+    let bitmask_bytes = vec![0u8; (req.part_count as usize).div_ceil(8)];
     update_bitmask(&state.pool, upload_id, &bitmask_bytes)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
-    let upload_state = get_upload_state(&state.pool, upload_id).await.map_err(|e| internal_error(e))?;
+    let upload_state = get_upload_state(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
 
     Ok(Json(upload_state))
 }
@@ -124,7 +133,7 @@ pub async fn get_status(
 ) -> Result<Json<UploadState>, (StatusCode, Json<ErrorResponse>)> {
     let upload = get_upload(&state.pool, upload_id)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     match upload {
         Some(u) if u.user_id == user_id => {
@@ -160,7 +169,7 @@ pub async fn heartbeat(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     update_heartbeat(&state.pool, upload_id)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -171,11 +180,11 @@ pub async fn confirm_part(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     mark_part_uploaded(&state.pool, upload_id, part_number, &body.etag)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     let upload = get_upload(&state.pool, upload_id)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     if let Some(u) = upload {
         let mut bitmask = u.parts_bitmask.unwrap_or_default();
@@ -189,7 +198,7 @@ pub async fn confirm_part(
 
         update_bitmask(&state.pool, upload_id, &bitmask)
             .await
-            .map_err(|e| internal_error(e))?;
+            .map_err(internal_error)?;
     }
 
     Ok(StatusCode::NO_CONTENT)
@@ -202,7 +211,7 @@ pub async fn complete(
 ) -> Result<Json<UploadState>, (StatusCode, Json<ErrorResponse>)> {
     let upload = get_upload(&state.pool, upload_id)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     let upload = match upload {
         Some(u) if u.user_id == user_id => u,
@@ -248,9 +257,11 @@ pub async fn complete(
 
     patch_upload_status(&state.pool, upload_id, "s3_completed")
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
-    let upload_state = get_upload_state(&state.pool, upload_id).await.map_err(|e| internal_error(e))?;
+    let upload_state = get_upload_state(&state.pool, upload_id)
+        .await
+        .map_err(internal_error)?;
     Ok(Json(upload_state))
 }
 
@@ -262,7 +273,7 @@ pub async fn register_file(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let upload = get_upload(&state.pool, upload_id)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     let upload = match upload {
         Some(u) if u.user_id == user_id => u,
@@ -331,16 +342,19 @@ pub async fn register_file(
         req.encrypted_thumbnail.as_deref(),
         req.thumbnail_size,
         upload.file_size,
-        upload.mime_type.as_deref().unwrap_or("application/octet-stream"),
+        upload
+            .mime_type
+            .as_deref()
+            .unwrap_or("application/octet-stream"),
         &upload.file_hash,
         &object_key,
     )
     .await
-    .map_err(|e| internal_error(e))?;
+    .map_err(internal_error)?;
 
     patch_upload_status(&state.pool, upload_id, "done")
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     Ok(Json(serde_json::json!({
         "file_id": file_id,
@@ -355,7 +369,7 @@ pub async fn fail(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     patch_upload_status(&state.pool, upload_id, "failed")
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -398,19 +412,24 @@ async fn generate_presigned_urls(
     })
 }
 
-async fn get_upload_state(pool: &sqlx::PgPool, upload_id: Uuid) -> Result<UploadState, crate::error::ZooError> {
-    let upload = get_upload(pool, upload_id).await?.ok_or(crate::error::ZooError::NotFound)?;
+async fn get_upload_state(
+    pool: &sqlx::PgPool,
+    upload_id: Uuid,
+) -> Result<UploadState, crate::error::ZooError> {
+    let upload = get_upload(pool, upload_id)
+        .await?
+        .ok_or(crate::error::ZooError::NotFound)?;
     Ok(upload_to_state(upload))
 }
 
 fn upload_to_state(u: crate::db::models::Upload) -> UploadState {
     use base64::Engine;
 
-    let uploaded_parts = u.parts_bitmask.as_ref().map(|b| {
-        b.iter()
-            .map(|byte| byte.count_ones() as u16)
-            .sum::<u16>()
-    }).unwrap_or(0);
+    let _uploaded_parts = u
+        .parts_bitmask
+        .as_ref()
+        .map(|b| b.iter().map(|byte| byte.count_ones() as u16).sum::<u16>())
+        .unwrap_or(0);
 
     UploadState {
         upload_id: u.id.to_string(),
@@ -422,7 +441,8 @@ fn upload_to_state(u: crate::db::models::Upload) -> UploadState {
         mime_type: u.mime_type,
         part_size: u.part_size,
         part_count: u.part_count as u16,
-        parts_bitmask: u.parts_bitmask
+        parts_bitmask: u
+            .parts_bitmask
             .map(|b| base64::engine::general_purpose::STANDARD.encode(b))
             .unwrap_or_default(),
         object_key: u.object_key,

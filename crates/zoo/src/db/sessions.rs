@@ -1,8 +1,8 @@
+use crate::db::models::Session;
+use crate::error::ZooError;
 use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
-use crate::db::models::Session;
-use crate::error::ZooError;
 
 pub async fn create_session(
     pool: &PgPool,

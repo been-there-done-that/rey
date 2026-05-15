@@ -1,9 +1,10 @@
+use crate::db::models::Upload;
+use crate::error::ZooError;
 use chrono::Utc;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
-use crate::db::models::Upload;
-use crate::error::ZooError;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_upload(
     pool: &PgPool,
     user_id: Uuid,
@@ -46,43 +47,29 @@ pub async fn get_upload(pool: &PgPool, id: Uuid) -> Result<Option<Upload>, ZooEr
     Ok(upload)
 }
 
-pub async fn patch_upload_status(
-    pool: &PgPool,
-    id: Uuid,
-    status: &str,
-) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE uploads SET status = $1 WHERE id = $2",
-    )
-    .bind(status)
-    .bind(id)
-    .execute(pool)
-    .await?;
+pub async fn patch_upload_status(pool: &PgPool, id: Uuid, status: &str) -> Result<(), ZooError> {
+    sqlx::query("UPDATE uploads SET status = $1 WHERE id = $2")
+        .bind(status)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
-pub async fn update_bitmask(
-    pool: &PgPool,
-    id: Uuid,
-    bitmask: &[u8],
-) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE uploads SET parts_bitmask = $1 WHERE id = $2",
-    )
-    .bind(bitmask)
-    .bind(id)
-    .execute(pool)
-    .await?;
+pub async fn update_bitmask(pool: &PgPool, id: Uuid, bitmask: &[u8]) -> Result<(), ZooError> {
+    sqlx::query("UPDATE uploads SET parts_bitmask = $1 WHERE id = $2")
+        .bind(bitmask)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 pub async fn update_heartbeat(pool: &PgPool, id: Uuid) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE uploads SET last_heartbeat_at = NOW() WHERE id = $1",
-    )
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE uploads SET last_heartbeat_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -135,12 +122,10 @@ pub async fn list_stalled_uploads(
 }
 
 pub async fn mark_stalled(pool: &PgPool, id: Uuid) -> Result<(), ZooError> {
-    sqlx::query(
-        "UPDATE uploads SET status = 'stalled', stalled_at = NOW() WHERE id = $1",
-    )
-    .bind(id)
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE uploads SET status = 'stalled', stalled_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

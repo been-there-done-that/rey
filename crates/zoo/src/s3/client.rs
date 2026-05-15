@@ -1,10 +1,10 @@
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{config::Region, Client};
 use crate::config::ZooConfig;
 use crate::error::ZooError;
+use aws_config::BehaviorVersion;
+use aws_sdk_s3::{config::Region, Client};
 
 pub async fn create_client(config: &ZooConfig) -> Result<Client, ZooError> {
-    let mut sdk_config = aws_config::defaults(BehaviorVersion::latest())
+    let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region(Region::new(config.s3_region.clone()))
         .load()
         .await;
@@ -20,11 +20,7 @@ pub async fn create_client(config: &ZooConfig) -> Result<Client, ZooError> {
     Ok(client)
 }
 
-pub async fn head_object_size(
-    client: &Client,
-    bucket: &str,
-    key: &str,
-) -> Result<i64, ZooError> {
+pub async fn head_object_size(client: &Client, bucket: &str, key: &str) -> Result<i64, ZooError> {
     let resp = client
         .head_object()
         .bucket(bucket)
@@ -34,7 +30,7 @@ pub async fn head_object_size(
         .map_err(|e| ZooError::S3(e.to_string()))?;
 
     let size = resp.content_length().unwrap_or(0);
-    Ok(size as i64)
+    Ok(size)
 }
 
 pub async fn abort_multipart_upload(
@@ -54,11 +50,7 @@ pub async fn abort_multipart_upload(
     Ok(())
 }
 
-pub async fn delete_object(
-    client: &Client,
-    bucket: &str,
-    key: &str,
-) -> Result<(), ZooError> {
+pub async fn delete_object(client: &Client, bucket: &str, key: &str) -> Result<(), ZooError> {
     client
         .delete_object()
         .bucket(bucket)

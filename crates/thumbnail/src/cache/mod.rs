@@ -1,14 +1,14 @@
 pub mod disk;
 pub mod memory;
 
+use crate::cache::disk::DiskCache;
+use crate::cache::memory::MemoryCache;
+use crate::error::ThumbnailError;
+use crate::inflight::InflightMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use types::crypto::{Header24, Key256};
-use crate::error::ThumbnailError;
-use crate::cache::disk::DiskCache;
-use crate::cache::memory::MemoryCache;
-use crate::inflight::InflightMap;
 
 pub struct ThumbnailCache {
     memory: Arc<Mutex<MemoryCache>>,
@@ -17,7 +17,11 @@ pub struct ThumbnailCache {
 }
 
 impl ThumbnailCache {
-    pub fn new(memory_capacity: usize, cache_dir: PathBuf, max_disk_bytes: u64) -> Result<Self, ThumbnailError> {
+    pub fn new(
+        memory_capacity: usize,
+        cache_dir: PathBuf,
+        max_disk_bytes: u64,
+    ) -> Result<Self, ThumbnailError> {
         let disk = DiskCache::new(cache_dir, max_disk_bytes)
             .map_err(|e| ThumbnailError::CacheError(e.to_string()))?;
 
@@ -33,7 +37,9 @@ impl ThumbnailCache {
         file_id: i64,
         file_key: &Key256,
         thumb_header: &Header24,
-        fetcher: impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, ThumbnailError>> + Send>> + Send,
+        fetcher: impl FnOnce() -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<Vec<u8>, ThumbnailError>> + Send>,
+            > + Send,
     ) -> Result<Vec<u8>, ThumbnailError> {
         let file_id_str = file_id.to_string();
 

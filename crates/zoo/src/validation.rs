@@ -66,7 +66,9 @@ pub fn validate_device_name(name: &str) -> Result<(), ZooError> {
         return Err(ZooError::Validation("invalid device name".to_string()));
     }
     if name.contains('\0') {
-        return Err(ZooError::Validation("device name contains null bytes".to_string()));
+        return Err(ZooError::Validation(
+            "device name contains null bytes".to_string(),
+        ));
     }
     Ok(())
 }
@@ -83,8 +85,8 @@ mod tests {
 
     #[test]
     fn test_validate_part_size() {
-        assert!(validate_part_size(MIN_PART_SIZE).is_ok());
-        assert!(validate_part_size(MIN_PART_SIZE - 1).is_err());
+        assert!(validate_part_size(MIN_PART_SIZE as u64).is_ok());
+        assert!(validate_part_size((MIN_PART_SIZE - 1) as u64).is_err());
         assert!(validate_part_size(MAX_PART_SIZE + 1).is_err());
     }
 

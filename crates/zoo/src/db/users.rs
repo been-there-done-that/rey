@@ -1,8 +1,9 @@
-use sqlx::PgPool;
-use uuid::Uuid;
 use crate::db::models::User;
 use crate::error::ZooError;
+use sqlx::PgPool;
+use uuid::Uuid;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn register_user(
     pool: &PgPool,
     email: &str,

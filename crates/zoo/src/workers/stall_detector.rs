@@ -1,3 +1,5 @@
+use crate::db::uploads::{list_stalled_uploads, mark_stalled};
+use crate::sse::hub::SseHub;
 use base64::Engine;
 use chrono::Utc;
 use sqlx::PgPool;
@@ -5,8 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 use tracing::info;
-use crate::db::uploads::{list_stalled_uploads, mark_stalled};
-use crate::sse::hub::SseHub;
 use types::sse::SseEvent;
 
 pub struct StallDetector {

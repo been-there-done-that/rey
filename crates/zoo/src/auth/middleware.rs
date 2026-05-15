@@ -1,11 +1,11 @@
+use crate::db::sessions::lookup_session;
+use crate::state::AppState;
 use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
-use crate::db::sessions::lookup_session;
-use crate::state::AppState;
 
 pub struct AuthState {
     pub pool: sqlx::PgPool,

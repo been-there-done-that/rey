@@ -1,12 +1,10 @@
-use types::crypto::{EncryptedKey, Key256};
 use crate::aead::secretbox::secretbox_decrypt;
 use crate::error::CryptoError;
+use types::crypto::{EncryptedKey, Key256};
 
 pub fn decrypt_key(encrypted: &EncryptedKey, wrapping_key: &Key256) -> Result<Key256, CryptoError> {
     let plaintext = secretbox_decrypt(&encrypted.nonce, &encrypted.ciphertext, wrapping_key)?;
-    let bytes: [u8; 32] = plaintext
-        .try_into()
-        .map_err(|_| CryptoError::InvalidKey)?;
+    let bytes: [u8; 32] = plaintext.try_into().map_err(|_| CryptoError::InvalidKey)?;
     Ok(Key256::new(bytes))
 }
 

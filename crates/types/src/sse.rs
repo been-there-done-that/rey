@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::upload::{UploadStatus, UploadSummary};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -75,7 +75,9 @@ mod tests {
 
     #[test]
     fn test_sse_event_heartbeat_tag() {
-        let event = SseEvent::Heartbeat { timestamp: 1700000000000 };
+        let event = SseEvent::Heartbeat {
+            timestamp: 1700000000000,
+        };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""type":"heartbeat""#));
     }

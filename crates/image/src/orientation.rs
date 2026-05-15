@@ -1,5 +1,5 @@
-use image::DynamicImage;
 use image::imageops;
+use image::DynamicImage;
 
 pub fn apply_orientation(image: DynamicImage, orientation: u16) -> DynamicImage {
     match orientation {

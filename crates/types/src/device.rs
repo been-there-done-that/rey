@@ -32,10 +32,22 @@ mod tests {
 
     #[test]
     fn test_device_platform_serialization() {
-        assert_eq!(serde_json::to_string(&DevicePlatform::Android).unwrap(), "\"android\"");
-        assert_eq!(serde_json::to_string(&DevicePlatform::Ios).unwrap(), "\"ios\"");
-        assert_eq!(serde_json::to_string(&DevicePlatform::Web).unwrap(), "\"web\"");
-        assert_eq!(serde_json::to_string(&DevicePlatform::Desktop).unwrap(), "\"desktop\"");
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::Android).unwrap(),
+            "\"android\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::Ios).unwrap(),
+            "\"ios\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::Web).unwrap(),
+            "\"web\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DevicePlatform::Desktop).unwrap(),
+            "\"desktop\""
+        );
     }
 
     #[test]

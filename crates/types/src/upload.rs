@@ -64,20 +64,50 @@ mod tests {
 
     #[test]
     fn test_upload_status_serializes_to_snake_case() {
-        assert_eq!(serde_json::to_string(&UploadStatus::Pending).unwrap(), "\"pending\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Encrypting).unwrap(), "\"encrypting\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Uploading).unwrap(), "\"uploading\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::S3Completed).unwrap(), "\"s3_completed\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Registering).unwrap(), "\"registering\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Done).unwrap(), "\"done\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Stalled).unwrap(), "\"stalled\"");
-        assert_eq!(serde_json::to_string(&UploadStatus::Failed).unwrap(), "\"failed\"");
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Encrypting).unwrap(),
+            "\"encrypting\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Uploading).unwrap(),
+            "\"uploading\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::S3Completed).unwrap(),
+            "\"s3_completed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Registering).unwrap(),
+            "\"registering\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Done).unwrap(),
+            "\"done\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Stalled).unwrap(),
+            "\"stalled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&UploadStatus::Failed).unwrap(),
+            "\"failed\""
+        );
     }
 
     #[test]
     fn test_upload_status_deserializes_from_snake_case() {
-        assert_eq!(serde_json::from_str::<UploadStatus>("\"pending\"").unwrap(), UploadStatus::Pending);
-        assert_eq!(serde_json::from_str::<UploadStatus>("\"s3_completed\"").unwrap(), UploadStatus::S3Completed);
+        assert_eq!(
+            serde_json::from_str::<UploadStatus>("\"pending\"").unwrap(),
+            UploadStatus::Pending
+        );
+        assert_eq!(
+            serde_json::from_str::<UploadStatus>("\"s3_completed\"").unwrap(),
+            UploadStatus::S3Completed
+        );
     }
 
     #[test]

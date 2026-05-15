@@ -1,6 +1,6 @@
+use crate::error::LocalDbError;
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
-use crate::error::LocalDbError;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/001_initial.sql"),
@@ -27,7 +27,8 @@ impl LocalDb {
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.pragma_update(None, "synchronous", "normal")?;
 
-        let version: Result<i32, _> = conn.pragma_query_value(None, "user_version", |row| row.get(0));
+        let version: Result<i32, _> =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0));
         match version {
             Ok(v) if v >= 0 => {}
             _ => return Err(LocalDbError::InvalidKey),
@@ -78,8 +79,9 @@ impl LocalDb {
                 continue;
             }
 
-            conn.execute_batch(migration)
-                .map_err(|e| LocalDbError::MigrationFailed(format!("migration {}: {}", i + 1, e)))?;
+            conn.execute_batch(migration).map_err(|e| {
+                LocalDbError::MigrationFailed(format!("migration {}: {}", i + 1, e))
+            })?;
         }
 
         Ok(())

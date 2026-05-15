@@ -1,7 +1,7 @@
-use proptest::prelude::*;
 use crate::aead::{secretbox_decrypt, secretbox_encrypt, stream_decrypt, stream_encrypt};
 use crate::key::generate_key;
 use crate::seal::{generate_keypair, open, seal};
+use proptest::prelude::*;
 
 proptest! {
     #[test]

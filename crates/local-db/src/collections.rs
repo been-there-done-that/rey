@@ -1,7 +1,7 @@
-use rusqlite::{Connection, OptionalExtension};
-use types::collection::Collection;
 use crate::error::LocalDbError;
 use common::time::now_ms;
+use rusqlite::{Connection, OptionalExtension};
+use types::collection::Collection;
 
 pub fn upsert_collection(conn: &Connection, collection: &Collection) -> Result<(), LocalDbError> {
     conn.execute(
@@ -26,30 +26,33 @@ pub fn upsert_collection(conn: &Connection, collection: &Collection) -> Result<(
 pub fn list_collections(conn: &Connection) -> Result<Vec<Collection>, LocalDbError> {
     let mut stmt = conn.prepare(
         "SELECT id, name, encrypted_key, key_nonce, updation_time, created_at, archived_at
-         FROM collections WHERE archived_at IS NULL"
+         FROM collections WHERE archived_at IS NULL",
     )?;
-    let collections = stmt.query_map([], |row| {
-        Ok(Collection {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            encrypted_key: row.get(2)?,
-            key_nonce: row.get(3)?,
-            updation_time: row.get(4)?,
-            created_at: row.get(5)?,
-            archived_at: row.get(6)?,
-        })
-    })?
-    .collect::<Result<Vec<_>, _>>()?;
+    let collections = stmt
+        .query_map([], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                encrypted_key: row.get(2)?,
+                key_nonce: row.get(3)?,
+                updation_time: row.get(4)?,
+                created_at: row.get(5)?,
+                archived_at: row.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(collections)
 }
 
-pub fn get_collection_key(conn: &Connection, id: &str) -> Result<Option<(String, String)>, LocalDbError> {
-    let mut stmt = conn.prepare(
-        "SELECT encrypted_key, key_nonce FROM collections WHERE id = ?1"
-    )?;
-    let result = stmt.query_row([id], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    }).optional()?;
+pub fn get_collection_key(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<(String, String)>, LocalDbError> {
+    let mut stmt =
+        conn.prepare("SELECT encrypted_key, key_nonce FROM collections WHERE id = ?1")?;
+    let result = stmt
+        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
     Ok(result)
 }
 

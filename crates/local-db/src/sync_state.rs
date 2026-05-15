@@ -1,5 +1,5 @@
-use rusqlite::{Connection, OptionalExtension};
 use crate::error::LocalDbError;
+use rusqlite::{Connection, OptionalExtension};
 
 pub fn read_cursor(conn: &Connection, key: &str) -> Result<Option<i64>, LocalDbError> {
     let mut stmt = conn.prepare("SELECT value FROM sync_state WHERE key = ?1")?;
@@ -33,7 +33,9 @@ mod tests {
     #[test]
     fn test_read_write_cursor() {
         let (db, _dir) = test_db();
-        assert!(read_cursor(&db.conn, "collections_since").unwrap().is_none());
+        assert!(read_cursor(&db.conn, "collections_since")
+            .unwrap()
+            .is_none());
         write_cursor(&db.conn, "collections_since", 1700000000000).unwrap();
         let value = read_cursor(&db.conn, "collections_since").unwrap().unwrap();
         assert_eq!(value, 1700000000000);

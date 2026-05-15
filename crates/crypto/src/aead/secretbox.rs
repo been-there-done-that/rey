@@ -1,18 +1,24 @@
-use alloc::vec::Vec;
+use crate::error::CryptoError;
 use aead::{Aead, KeyInit};
+use alloc::vec::Vec;
+use rand_core::OsRng;
 use types::crypto::{Key256, Nonce24};
 use xsalsa20poly1305::XSalsa20Poly1305;
-use rand_core::OsRng;
-use crate::error::CryptoError;
 
 pub fn secretbox_encrypt(plaintext: &[u8], key: &Key256) -> (Nonce24, Vec<u8>) {
     let cipher = XSalsa20Poly1305::new(key.as_bytes().into());
     let nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
-    let ciphertext = cipher.encrypt(&nonce, plaintext).expect("encryption failed");
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext)
+        .expect("encryption failed");
     (Nonce24::new(nonce.into()), ciphertext)
 }
 
-pub fn secretbox_decrypt(nonce: &Nonce24, ciphertext: &[u8], key: &Key256) -> Result<Vec<u8>, CryptoError> {
+pub fn secretbox_decrypt(
+    nonce: &Nonce24,
+    ciphertext: &[u8],
+    key: &Key256,
+) -> Result<Vec<u8>, CryptoError> {
     let cipher = XSalsa20Poly1305::new(key.as_bytes().into());
     cipher
         .decrypt(nonce.as_bytes().into(), ciphertext)

@@ -1,13 +1,13 @@
-use axum::extract::FromRef;
-use aws_sdk_s3::Client;
-use sqlx::PgPool;
-use std::sync::Arc;
-use types::upload::UploadStatus;
-use types::error::ErrorCode;
-use types::error::ApiError;
 use crate::auth::middleware::AuthState;
 use crate::config::ZooConfig;
 use crate::sse::hub::SseHub;
+use aws_sdk_s3::Client;
+use axum::extract::FromRef;
+use sqlx::PgPool;
+use std::sync::Arc;
+use types::error::ApiError;
+use types::error::ErrorCode;
+use types::upload::UploadStatus;
 
 #[derive(Clone, FromRef)]
 pub struct AppState {
@@ -26,22 +26,22 @@ impl AppState {
 }
 
 pub fn validate_transition(from: UploadStatus, to: UploadStatus) -> Result<(), ApiError> {
-    let valid = match (from, to) {
-        (UploadStatus::Pending, UploadStatus::Encrypting) => true,
-        (UploadStatus::Pending, UploadStatus::Failed) => true,
-        (UploadStatus::Encrypting, UploadStatus::Uploading) => true,
-        (UploadStatus::Encrypting, UploadStatus::Failed) => true,
-        (UploadStatus::Uploading, UploadStatus::S3Completed) => true,
-        (UploadStatus::Uploading, UploadStatus::Stalled) => true,
-        (UploadStatus::Uploading, UploadStatus::Failed) => true,
-        (UploadStatus::S3Completed, UploadStatus::Registering) => true,
-        (UploadStatus::S3Completed, UploadStatus::Failed) => true,
-        (UploadStatus::Registering, UploadStatus::Done) => true,
-        (UploadStatus::Registering, UploadStatus::Failed) => true,
-        (UploadStatus::Stalled, UploadStatus::Uploading) => true,
-        (UploadStatus::Stalled, UploadStatus::Failed) => true,
-        _ => false,
-    };
+    let valid = matches!(
+        (from, to),
+        (UploadStatus::Pending, UploadStatus::Encrypting)
+            | (UploadStatus::Pending, UploadStatus::Failed)
+            | (UploadStatus::Encrypting, UploadStatus::Uploading)
+            | (UploadStatus::Encrypting, UploadStatus::Failed)
+            | (UploadStatus::Uploading, UploadStatus::S3Completed)
+            | (UploadStatus::Uploading, UploadStatus::Stalled)
+            | (UploadStatus::Uploading, UploadStatus::Failed)
+            | (UploadStatus::S3Completed, UploadStatus::Registering)
+            | (UploadStatus::S3Completed, UploadStatus::Failed)
+            | (UploadStatus::Registering, UploadStatus::Done)
+            | (UploadStatus::Registering, UploadStatus::Failed)
+            | (UploadStatus::Stalled, UploadStatus::Uploading)
+            | (UploadStatus::Stalled, UploadStatus::Failed)
+    );
 
     if valid {
         Ok(())

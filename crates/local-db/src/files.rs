@@ -1,7 +1,7 @@
-use rusqlite::{Connection, OptionalExtension, params};
-use types::file::FileRecord;
 use crate::error::LocalDbError;
 use common::time::now_ms;
+use rusqlite::{params, Connection, OptionalExtension};
+use types::file::FileRecord;
 
 pub fn upsert_files(conn: &Connection, files: &[FileRecord]) -> Result<(), LocalDbError> {
     let tx = conn.unchecked_transaction()?;
@@ -22,11 +22,26 @@ pub fn upsert_files(conn: &Connection, files: &[FileRecord]) -> Result<(), Local
         )?;
         for f in files {
             stmt.execute(params![
-                f.id, &f.collection_id, &f.cipher, &f.title, &f.description,
-                f.latitude, f.longitude, f.taken_at, f.file_size, &f.mime_type,
-                &f.content_hash, &f.encrypted_key, &f.key_nonce,
-                &f.file_decryption_header, &f.thumb_decryption_header,
-                &f.object_key, &f.thumbnail_path, f.updation_time, f.created_at, f.archived_at,
+                f.id,
+                &f.collection_id,
+                &f.cipher,
+                &f.title,
+                &f.description,
+                f.latitude,
+                f.longitude,
+                f.taken_at,
+                f.file_size,
+                &f.mime_type,
+                &f.content_hash,
+                &f.encrypted_key,
+                &f.key_nonce,
+                &f.file_decryption_header,
+                &f.thumb_decryption_header,
+                &f.object_key,
+                &f.thumbnail_path,
+                f.updation_time,
+                f.created_at,
+                f.archived_at,
             ])?;
         }
     }
@@ -79,9 +94,10 @@ pub fn list_files(conn: &Connection, collection_id: &str) -> Result<Vec<FileReco
          file_decryption_header, thumb_decryption_header, object_key, thumbnail_path,
          updation_time, created_at, archived_at
          FROM files WHERE collection_id = ?1 AND archived_at IS NULL
-         ORDER BY taken_at DESC"
+         ORDER BY taken_at DESC",
     )?;
-    let files = stmt.query_map([collection_id], row_to_file_record)?
+    let files = stmt
+        .query_map([collection_id], row_to_file_record)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(files)
 }
@@ -92,7 +108,7 @@ pub fn get_file(conn: &Connection, id: i64) -> Result<Option<FileRecord>, LocalD
          taken_at, file_size, mime_type, content_hash, encrypted_key, key_nonce,
          file_decryption_header, thumb_decryption_header, object_key, thumbnail_path,
          updation_time, created_at, archived_at
-         FROM files WHERE id = ?1"
+         FROM files WHERE id = ?1",
     )?;
     let file = stmt.query_row([id], row_to_file_record).optional()?;
     Ok(file)
@@ -104,9 +120,10 @@ pub fn list_files_without_thumbnail(conn: &Connection) -> Result<Vec<FileRecord>
          taken_at, file_size, mime_type, content_hash, encrypted_key, key_nonce,
          file_decryption_header, thumb_decryption_header, object_key, thumbnail_path,
          updation_time, created_at, archived_at
-         FROM files WHERE thumbnail_path IS NULL AND archived_at IS NULL"
+         FROM files WHERE thumbnail_path IS NULL AND archived_at IS NULL",
     )?;
-    let files = stmt.query_map([], row_to_file_record)?
+    let files = stmt
+        .query_map([], row_to_file_record)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(files)
 }

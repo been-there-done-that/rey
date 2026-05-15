@@ -130,7 +130,12 @@ mod tests {
             ciphertext[0] ^= 0xFF;
         }
         let result = decrypt_metadata(&header, &ciphertext, &key);
-        assert!(matches!(result, Err(MetadataError::Crypto(crypto::error::CryptoError::MacMismatch))));
+        assert!(matches!(
+            result,
+            Err(MetadataError::Crypto(
+                crypto::error::CryptoError::MacMismatch
+            ))
+        ));
     }
 
     #[test]

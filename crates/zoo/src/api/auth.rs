@@ -1,18 +1,15 @@
+use crate::db::sessions::{create_session, revoke_session};
+use crate::db::users::{find_user_by_email, register_user};
+use crate::error::ZooError;
+use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
 use types::error::{ApiError, ErrorCode, ErrorResponse};
 use types::user::{LoginParams, LoginRequest, LoginResponse, UserRegistration};
 use uuid::Uuid;
-use crate::auth::middleware::AuthState;
-use crate::config::ZooConfig;
-use crate::db::sessions::{create_session, revoke_session};
-use crate::db::users::{find_user_by_email, register_user};
-use crate::error::ZooError;
-use crate::state::AppState;
 
 pub async fn get_login_params(
     State(state): State<AppState>,
@@ -20,7 +17,7 @@ pub async fn get_login_params(
 ) -> Result<Json<LoginParams>, (StatusCode, Json<ErrorResponse>)> {
     let user = find_user_by_email(&state.pool, &req.email)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     match user {
         Some(u) => Ok(Json(LoginParams {
@@ -50,7 +47,7 @@ pub async fn login(
 ) -> Result<Json<LoginResponse>, (StatusCode, Json<ErrorResponse>)> {
     let user = find_user_by_email(&state.pool, &req.email)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     match user {
         Some(u) => {
@@ -72,11 +69,12 @@ pub async fn login(
 
             let session_token = Uuid::new_v4().to_string();
             let token_hash = format!("{:x}", Sha256::digest(session_token.as_bytes()));
-            let expires_at = chrono::Utc::now() + chrono::Duration::from_std(state.config.session_ttl).unwrap();
+            let expires_at =
+                chrono::Utc::now() + chrono::Duration::from_std(state.config.session_ttl).unwrap();
 
             create_session(&state.pool, u.id, &token_hash, expires_at)
                 .await
-                .map_err(|e| internal_error(e))?;
+                .map_err(internal_error)?;
 
             Ok(Json(LoginResponse {
                 session_token,
@@ -147,18 +145,16 @@ pub async fn logout(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    let auth_header = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .ok_or((
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponse {
-                error: ApiError {
-                    code: ErrorCode::Unauthorized,
-                    message: "missing authorization header".to_string(),
-                    details: None,
-                },
-            }),
-        ))?;
+    let auth_header = headers.get(axum::http::header::AUTHORIZATION).ok_or((
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: ApiError {
+                code: ErrorCode::Unauthorized,
+                message: "missing authorization header".to_string(),
+                details: None,
+            },
+        }),
+    ))?;
 
     let auth_str = auth_header.to_str().map_err(|_| {
         (
@@ -178,7 +174,7 @@ pub async fn logout(
 
     revoke_session(&state.pool, &token_hash)
         .await
-        .map_err(|e| internal_error(e))?;
+        .map_err(internal_error)?;
 
     Ok(StatusCode::NO_CONTENT)
 }

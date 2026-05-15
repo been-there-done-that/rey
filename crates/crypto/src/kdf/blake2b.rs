@@ -7,7 +7,10 @@ pub fn derive_verification_key(kek: &Key256) -> Key256 {
     params.key(kek.as_bytes());
     params.personal(b"verification");
     let hash: Hash = params.hash(b"");
-    let bytes: [u8; 32] = hash.as_bytes().try_into().expect("BLAKE2b output is 32 bytes");
+    let bytes: [u8; 32] = hash
+        .as_bytes()
+        .try_into()
+        .expect("BLAKE2b output is 32 bytes");
     Key256::new(bytes)
 }
 
@@ -25,7 +28,10 @@ pub fn derive_subkey(master: &Key256, context: &str, id: u64) -> Key256 {
     let mut data = [0u8; 8];
     data.copy_from_slice(&id.to_le_bytes());
     let hash: Hash = params.hash(&data);
-    let bytes: [u8; 32] = hash.as_bytes().try_into().expect("BLAKE2b output is 32 bytes");
+    let bytes: [u8; 32] = hash
+        .as_bytes()
+        .try_into()
+        .expect("BLAKE2b output is 32 bytes");
     Key256::new(bytes)
 }
 
