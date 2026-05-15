@@ -9,6 +9,7 @@ repository.workspace = true
 types = { workspace = true }
 crypto = { workspace = true }
 rey-image = { workspace = true }
+metadata = { workspace = true }
 lru = { workspace = true }
 dashmap = { workspace = true }
 tokio = { workspace = true }
@@ -19,3 +20,4 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }
+tempfile = { workspace = true }
