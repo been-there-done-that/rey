@@ -83,8 +83,8 @@ mod tests {
 
     #[test]
     fn test_validate_part_size() {
-        assert!(validate_part_size(MIN_PART_SIZE).is_ok());
-        assert!(validate_part_size(MIN_PART_SIZE - 1).is_err());
+        assert!(validate_part_size(MIN_PART_SIZE as u64).is_ok());
+        assert!(validate_part_size((MIN_PART_SIZE - 1) as u64).is_err());
         assert!(validate_part_size(MAX_PART_SIZE + 1).is_err());
     }
 

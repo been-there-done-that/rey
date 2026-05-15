@@ -1,4 +1,3 @@
-use serde::Serialize;
 use types::sse::SseEvent;
 
 pub fn format_sse(event: &SseEvent) -> String {

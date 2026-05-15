@@ -4,7 +4,7 @@ use crate::config::ZooConfig;
 use crate::error::ZooError;
 
 pub async fn create_client(config: &ZooConfig) -> Result<Client, ZooError> {
-    let mut sdk_config = aws_config::defaults(BehaviorVersion::latest())
+    let sdk_config = aws_config::defaults(BehaviorVersion::latest())
         .region(Region::new(config.s3_region.clone()))
         .load()
         .await;

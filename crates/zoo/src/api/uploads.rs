@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::{StatusCode, HeaderValue};
+use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 use types::error::{ApiError, ErrorCode, ErrorResponse};
@@ -406,7 +406,7 @@ async fn get_upload_state(pool: &sqlx::PgPool, upload_id: Uuid) -> Result<Upload
 fn upload_to_state(u: crate::db::models::Upload) -> UploadState {
     use base64::Engine;
 
-    let uploaded_parts = u.parts_bitmask.as_ref().map(|b| {
+    let _uploaded_parts = u.parts_bitmask.as_ref().map(|b| {
         b.iter()
             .map(|byte| byte.count_ones() as u16)
             .sum::<u16>()

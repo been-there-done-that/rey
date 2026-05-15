@@ -162,7 +162,8 @@ mod tests {
     use super::*;
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("thumb_disk_test_{}", std::process::id()));
+        let id = format!("{}_{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        let dir = std::env::temp_dir().join(format!("thumb_disk_test_{}", id));
         let _ = fs::remove_dir_all(&dir);
         dir
     }

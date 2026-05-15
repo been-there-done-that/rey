@@ -56,7 +56,7 @@ impl LocalDb {
             }
             Err(keyring::Error::NoEntry) => {
                 let mut key = [0u8; 32];
-                getrandom::getrandom(&mut key).map_err(|_| LocalDbError::KeychainUnavailable)?;
+                getrandom::fill(&mut key).map_err(|_| LocalDbError::KeychainUnavailable)?;
                 let hex_key = hex::encode(key);
                 entry
                     .set_password(&hex_key)

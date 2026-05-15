@@ -1,7 +1,6 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use sha2::{Digest, Sha256};
 use types::device::{DeviceInfo, DeviceRegistration};
 use types::error::{ApiError, ErrorCode, ErrorResponse};
 use uuid::Uuid;
@@ -19,7 +18,7 @@ pub async fn register(
 
     let sse_token = Uuid::new_v4().to_string();
 
-    let device_id = register_device(
+    let _device_id = register_device(
         &state.pool,
         user_id,
         &req.name,

@@ -7,7 +7,7 @@ use futures::{Stream, StreamExt};
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
-use types::error::{ApiError, ErrorCode, ErrorResponse};
+use types::error::ErrorResponse;
 use types::sse::SseEvent;
 use uuid::Uuid;
 use crate::state::AppState;

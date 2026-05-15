@@ -129,6 +129,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_from_env_reads_server_url() {
         clear_env();
         env::set_var("REY_SERVER_URL", "https://api.example.com");
@@ -140,6 +141,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_from_env_reads_log_level() {
         clear_env();
         env::set_var("REY_LOG_LEVEL", "debug");
@@ -151,6 +153,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_from_env_reads_db_path() {
         clear_env();
         env::set_var("REY_DB_PATH", "/tmp/test.db");
