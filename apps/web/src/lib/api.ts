@@ -1,7 +1,7 @@
 import ky from "ky"
 
 const apiBase = ky.create({
-  prefix: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080",
+  prefix: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3002",
   timeout: 15000,
 })
 
