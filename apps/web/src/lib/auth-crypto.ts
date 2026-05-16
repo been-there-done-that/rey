@@ -50,6 +50,11 @@ export async function encryptKey(plaintextB64: string, wrappingB64: string) {
   }
 }
 
+export async function decryptKey(ciphertextB64: string, nonceB64: string, wrappingB64: string) {
+  await ensureWasm()
+  return getWasm().decrypt_key_b64(ciphertextB64, nonceB64, wrappingB64)
+}
+
 export async function streamEncrypt(dataB64: string, keyB64: string) {
   await ensureWasm()
   return JSON.parse(await getWasm().stream_encrypt_b64(dataB64, keyB64)) as {

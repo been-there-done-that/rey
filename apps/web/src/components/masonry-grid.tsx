@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useAuth } from "@/lib/auth-store"
 import { fetchFiles, type GalleryFile } from "@/lib/gallery-api"
+import { decryptFileKey, decryptThumbnail } from "@/lib/file-viewer"
 import { cn } from "@/lib/utils"
 import { Loader2Icon, ImageOffIcon } from "lucide-react"
 
@@ -23,8 +24,44 @@ interface TileProps {
 }
 
 function Tile({ file }: TileProps) {
+  const token = useAuth((s) => s.token)
+  const masterKey = useAuth((s) => s.masterKey)
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
+
+  useEffect(() => {
+    if (!token || !masterKey || !file.encrypted_thumbnail || !file.thumb_decryption_header) return
+
+    let cancelled = false
+
+    async function loadThumbnail() {
+      try {
+        const fileKey = await decryptFileKey(
+          file.encrypted_key,
+          file.key_decryption_nonce,
+          masterKey!
+        )
+
+        const thumbBlob = await decryptThumbnail(
+          file.encrypted_thumbnail!,
+          file.thumb_decryption_header!,
+          fileKey
+        )
+
+        if (!cancelled) {
+          const url = URL.createObjectURL(thumbBlob)
+          setThumbUrl(url)
+        }
+      } catch (err) {
+        console.error("Failed to decrypt thumbnail:", err)
+        if (!cancelled) setError(true)
+      }
+    }
+
+    loadThumbnail()
+    return () => { cancelled = true }
+  }, [token, masterKey, file])
 
   const aspectRatio = file.thumbnail_size
     ? Math.max(0.5, Math.min(1.5, 1 + (Math.random() - 0.5) * 0.6))
@@ -39,6 +76,15 @@ function Tile({ file }: TileProps) {
       )}
       style={{ aspectRatio: `${aspectRatio}` }}
     >
+      {thumbUrl && (
+        <img
+          src={thumbUrl}
+          alt=""
+          className="absolute inset-0 size-full object-cover"
+          onLoad={() => setLoaded(true)}
+          onError={() => setError(true)}
+        />
+      )}
       {!loaded && !error && (
         <div className="absolute inset-0 flex items-center justify-center">
           <Loader2Icon className="size-6 animate-spin text-muted-foreground" />

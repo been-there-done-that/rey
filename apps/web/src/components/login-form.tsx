@@ -24,7 +24,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { useAuth } from "@/lib/auth-store"
-import { deriveKek, deriveVerificationKey } from "@/lib/auth-crypto"
+import { deriveKek, deriveVerificationKey, decryptKey } from "@/lib/auth-crypto"
 
 const emailSchema = z.object({ email: z.string().email("Invalid email address") })
 type EmailInput = z.infer<typeof emailSchema>
@@ -38,6 +38,7 @@ export function LoginForm({
 }: React.ComponentProps<"div">) {
   const router = useRouter()
   const setToken = useAuth((s) => s.setToken)
+  const setMasterKey = useAuth((s) => s.setMasterKey)
   const [step, setStep] = useState<"email" | "password">("email")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -92,9 +93,25 @@ export function LoginForm({
 
       const loginRes = await api.post("api/auth/login", {
         json: { email, verify_key_hash: verifyKey },
-      }).json<{ session_token: string }>()
+      }).json<{
+        session_token: string
+        key_attributes: {
+          encrypted_master_key: string
+          key_nonce: string
+          kek_salt: string
+          mem_limit: number
+          ops_limit: number
+        }
+      }>()
+
+      const masterKey = await decryptKey(
+        loginRes.key_attributes.encrypted_master_key,
+        loginRes.key_attributes.key_nonce,
+        kek
+      )
 
       setToken(loginRes.session_token)
+      setMasterKey(masterKey)
       router.push(redirect)
     } catch {
       setError("Invalid password")

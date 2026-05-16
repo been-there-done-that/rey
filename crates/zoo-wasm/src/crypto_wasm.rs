@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use crypto::{
-    derive_kek, derive_verification_key, encrypt_key, generate_key, generate_keypair,
+    decrypt_key, derive_kek, derive_verification_key, encrypt_key, generate_key, generate_keypair,
     stream_decrypt, stream_encrypt,
     Argon2Profile, Key256, Salt16,
 };
@@ -79,6 +79,26 @@ pub fn encrypt_key_b64(plaintext_b64: &str, wrapping_b64: &str) -> Result<String
         "ciphertext": STANDARD.encode(&encrypted.ciphertext),
     });
     Ok(result.to_string())
+}
+
+#[wasm_bindgen]
+pub fn decrypt_key_b64(ciphertext_b64: &str, nonce_b64: &str, wrapping_b64: &str) -> Result<String, JsError> {
+    let ct_bytes = STANDARD.decode(ciphertext_b64).map_err(|e| JsError::new(&format!("invalid ciphertext: {e}")))?;
+    let nonce_bytes = STANDARD.decode(nonce_b64).map_err(|e| JsError::new(&format!("invalid nonce: {e}")))?;
+    let nonce: [u8; 24] = nonce_bytes.try_into().map_err(|_| JsError::new("nonce must be 24 bytes"))?;
+
+    let wk_bytes = STANDARD.decode(wrapping_b64).map_err(|e| JsError::new(&format!("invalid wrapping key: {e}")))?;
+    let wk: [u8; 32] = wk_bytes.try_into().map_err(|_| JsError::new("wrapping key must be 32 bytes"))?;
+    let wk = Key256::new(wk);
+
+    let encrypted = types::crypto::EncryptedKey {
+        nonce: types::crypto::Nonce24::new(nonce),
+        ciphertext: ct_bytes,
+    };
+
+    let decrypted = decrypt_key(&encrypted, &wk)
+        .map_err(|e| JsError::new(&format!("decryption failed: {e:?}")))?;
+    Ok(STANDARD.encode(decrypted.as_bytes()))
 }
 
 #[wasm_bindgen]

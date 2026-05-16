@@ -57,7 +57,9 @@ export class UploadManager {
 
   private async uploadFile(upload: UploadFile) {
     const token = useAuth.getState().token
+    const masterKey = useAuth.getState().masterKey
     if (!token) throw new Error("Not authenticated")
+    if (!masterKey) throw new Error("No master key")
 
     const fileKey = await generateKey()
 
@@ -90,6 +92,9 @@ export class UploadManager {
     const fileBytes = await upload.file.arrayBuffer()
     const fileB64 = arrayBufferToBase64(fileBytes)
     const fileEnc = await streamEncrypt(fileB64, fileKey)
+
+    // Step 2.5: Encrypt file key with master key
+    const fileKeyEnc = await encryptKey(fileKey, masterKey)
 
     // Step 3: Create upload on server
     upload.status = "uploading"
@@ -169,8 +174,8 @@ export class UploadManager {
     await authApi(token).post(`api/uploads/${uploadInit.upload_id}/register`, {
       json: {
         collection_id: "default",
-        encrypted_key: fileEnc.ciphertext,
-        key_decryption_nonce: fileEnc.header,
+        encrypted_key: fileKeyEnc.ciphertext,
+        key_decryption_nonce: fileKeyEnc.nonce,
         file_decryption_header: fileEnc.header,
         thumb_decryption_header: thumbEncHeader || null,
         encrypted_metadata: metadataEnc.ciphertext,
