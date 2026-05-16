@@ -1,11 +1,13 @@
 pub mod decrypt;
 pub mod encrypt;
 pub mod error;
+pub mod magic;
 pub mod structs;
 
 pub use decrypt::decrypt_metadata;
 pub use encrypt::encrypt_metadata;
 pub use error::MetadataError;
+pub use magic::{derive_magic_metadata, deserialize_magic_metadata, serialize_magic_metadata, MagicMetadata};
 pub use structs::FileMetadata;
 
 #[cfg(test)]

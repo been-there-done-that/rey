@@ -70,3 +70,77 @@ impl From<crate::state::AppError> for CommandError {
         CommandError::AppError(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_command_error_display_not_logged_in() {
+        let err = CommandError::NotLoggedIn;
+        assert_eq!(format!("{}", err), "not logged in");
+    }
+
+    #[test]
+    fn test_command_error_display_sync() {
+        let err = CommandError::SyncError("sync failed".to_string());
+        assert_eq!(format!("{}", err), "sync error: sync failed");
+    }
+
+    #[test]
+    fn test_command_error_display_validation() {
+        let err = CommandError::Validation("invalid input".to_string());
+        assert_eq!(format!("{}", err), "validation error: invalid input");
+    }
+
+    #[test]
+    fn test_command_error_serializes_with_tag() {
+        let err = CommandError::NotLoggedIn;
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"type\":\"NotLoggedIn\""));
+    }
+
+    #[test]
+    fn test_command_error_serializes_with_message() {
+        let err = CommandError::DbError("connection failed".to_string());
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("\"type\":\"DbError\""));
+        assert!(json.contains("connection failed"));
+    }
+
+    #[test]
+    fn test_command_error_debug_output() {
+        let err = CommandError::ZooError("timeout".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ZooError"));
+        assert!(debug.contains("timeout"));
+    }
+
+    #[test]
+    fn test_from_crypto_error() {
+        let crypto_err = crypto::error::CryptoError::MacMismatch;
+        let cmd_err: CommandError = crypto_err.into();
+        assert!(matches!(cmd_err, CommandError::CryptoError(_)));
+    }
+
+    #[test]
+    fn test_from_thumbnail_error() {
+        let thumb_err = thumbnail::ThumbnailError::NotFound;
+        let cmd_err: CommandError = thumb_err.into();
+        assert!(matches!(cmd_err, CommandError::ThumbnailError(_)));
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let cmd_err: CommandError = io_err.into();
+        assert!(matches!(cmd_err, CommandError::Io(_)));
+    }
+
+    #[test]
+    fn test_from_zoo_error() {
+        let zoo_err = zoo_client::ZooError::NotAuthenticated;
+        let cmd_err: CommandError = zoo_err.into();
+        assert!(matches!(cmd_err, CommandError::ZooError(_)));
+    }
+}

@@ -31,10 +31,9 @@ async fn ensure_test_db() {
             .expect("failed to check database existence");
 
     if !exists {
-        sqlx::query(&format!("CREATE DATABASE {}", TEST_DB))
+        let _ = sqlx::query(&format!("CREATE DATABASE {}", TEST_DB))
             .execute(&default_pool)
-            .await
-            .expect("failed to create test database");
+            .await;
     }
 
     default_pool.close().await;

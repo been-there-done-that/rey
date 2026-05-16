@@ -16,6 +16,7 @@ pub struct ZooHandle {
 
 #[wasm_bindgen]
 impl ZooHandle {
+    #[allow(deprecated)]
     #[wasm_bindgen(constructor)]
     pub async fn create(config: JsValue) -> Result<ZooHandle, JsError> {
         let config: ZooConfig = serde_wasm_bindgen::from_value(config)?;

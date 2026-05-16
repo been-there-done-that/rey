@@ -217,6 +217,7 @@ impl ZooClient {
         download::get_thumbnail(&self.inner.base_url, &token, file_id, &self.inner.client).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_upload(
         &self,
         token: &str,

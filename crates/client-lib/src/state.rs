@@ -81,3 +81,122 @@ impl AppState {
         *lock = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crypto::key::generate_key;
+
+    #[test]
+    fn test_app_error_display_db() {
+        let err = AppError::ConfigError("missing path".to_string());
+        assert_eq!(format!("{}", err), "config error: missing path");
+    }
+
+    #[test]
+    fn test_app_error_display_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
+        let err = AppError::IoError(io_err);
+        let msg = format!("{}", err);
+        assert!(msg.contains("not found"));
+    }
+
+    #[test]
+    fn test_app_error_debug() {
+        let err = AppError::ConfigError("test".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("ConfigError"));
+    }
+
+    #[tokio::test]
+    async fn test_master_key_set_and_clear() {
+        let key = generate_key();
+        let master_key: Arc<RwLock<Option<Key256>>> = Arc::new(RwLock::new(None));
+
+        {
+            let mut lock = master_key.write().await;
+            *lock = Some(key);
+        }
+
+        {
+            let lock = master_key.read().await;
+            assert!(lock.is_some());
+        }
+
+        {
+            let mut lock = master_key.write().await;
+            *lock = None;
+        }
+
+        {
+            let lock = master_key.read().await;
+            assert!(lock.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_session_token_set_and_clear() {
+        let token: Arc<RwLock<Option<String>>> = Arc::new(RwLock::new(None));
+
+        {
+            let mut lock = token.write().await;
+            *lock = Some("test-token-123".to_string());
+        }
+
+        {
+            let lock = token.read().await;
+            assert_eq!(lock.as_ref().unwrap(), "test-token-123");
+        }
+
+        {
+            let mut lock = token.write().await;
+            *lock = None;
+        }
+
+        {
+            let lock = token.read().await;
+            assert!(lock.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_device_info_set_and_clear() {
+        let device_info: Arc<RwLock<Option<DeviceInfo>>> = Arc::new(RwLock::new(None));
+
+        let device = DeviceInfo {
+            device_id: "device-1".to_string(),
+            name: "Test Device".to_string(),
+            platform: types::device::DevicePlatform::Desktop,
+            sse_token: "sse-token".to_string(),
+            push_token: None,
+            stall_timeout_seconds: 30,
+        };
+
+        {
+            let mut lock = device_info.write().await;
+            *lock = Some(device.clone());
+        }
+
+        {
+            let lock = device_info.read().await;
+            assert!(lock.is_some());
+            assert_eq!(lock.as_ref().unwrap().name, "Test Device");
+        }
+
+        {
+            let mut lock = device_info.write().await;
+            *lock = None;
+        }
+
+        {
+            let lock = device_info.read().await;
+            assert!(lock.is_none());
+        }
+    }
+
+    #[test]
+    fn test_zoo_client_base_url() {
+        let client = ZooClient::new("https://api.example.com".to_string());
+        assert_eq!(client.base_url(), "https://api.example.com");
+    }
+}
