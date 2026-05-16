@@ -8,7 +8,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { PlusCircleIcon, EnvelopeIcon } from "@phosphor-icons/react"
+import { CirclePlusIcon, MailIcon } from "lucide-react"
 
 export function NavMain({
   items,
@@ -28,7 +28,7 @@ export function NavMain({
               tooltip="Quick Create"
               className="min-w-8 bg-primary text-primary-foreground duration-200 ease-linear hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
             >
-              <PlusCircleIcon
+              <CirclePlusIcon
               />
               <span>Quick Create</span>
             </SidebarMenuButton>
@@ -37,7 +37,7 @@ export function NavMain({
               className="size-8 group-data-[collapsible=icon]:opacity-0"
               variant="outline"
             >
-              <EnvelopeIcon
+              <MailIcon
               />
               <span className="sr-only">Inbox</span>
             </Button>

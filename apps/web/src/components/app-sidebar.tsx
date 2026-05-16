@@ -15,7 +15,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { SquaresFourIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, CameraIcon, FileTextIcon, GearIcon, QuestionIcon, MagnifyingGlassIcon, DatabaseIcon, ChartLineIcon, FileIcon, CommandIcon } from "@phosphor-icons/react"
+import { LayoutDashboardIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, CameraIcon, FileTextIcon, Settings2Icon, CircleHelpIcon, SearchIcon, DatabaseIcon, FileChartColumnIcon, FileIcon, CommandIcon } from "lucide-react"
 
 const data = {
   user: {
@@ -26,9 +26,9 @@ const data = {
   navMain: [
     {
       title: "Dashboard",
-      url: "/d/home",
+      url: "#",
       icon: (
-        <SquaresFourIcon
+        <LayoutDashboardIcon
         />
       ),
     },
@@ -127,7 +127,7 @@ const data = {
       title: "Settings",
       url: "#",
       icon: (
-        <GearIcon
+        <Settings2Icon
         />
       ),
     },
@@ -135,7 +135,7 @@ const data = {
       title: "Get Help",
       url: "#",
       icon: (
-        <QuestionIcon
+        <CircleHelpIcon
         />
       ),
     },
@@ -143,7 +143,7 @@ const data = {
       title: "Search",
       url: "#",
       icon: (
-        <MagnifyingGlassIcon
+        <SearchIcon
         />
       ),
     },
@@ -161,7 +161,7 @@ const data = {
       name: "Reports",
       url: "#",
       icon: (
-        <ChartLineIcon
+        <FileChartColumnIcon
         />
       ),
     },
@@ -175,7 +175,6 @@ const data = {
     },
   ],
 }
-
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
@@ -183,13 +182,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              asChild
               className="data-[slot=sidebar-menu-button]:p-1.5!"
+              render={<a href="#" />}
             >
-              <a href="#">
-                <CommandIcon className="size-5!" />
-                <span className="text-base font-semibold">Acme Inc.</span>
-              </a>
+              <CommandIcon className="size-5!" />
+              <span className="text-base font-semibold">Acme Inc.</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

@@ -92,7 +92,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs"
-import { DotsSixVerticalIcon, CheckCircleIcon, SpinnerIcon, DotsThreeVerticalIcon, ColumnsIcon, CaretDownIcon, PlusIcon, CaretDoubleLeftIcon, CaretLeftIcon, CaretRightIcon, CaretDoubleRightIcon, TrendUpIcon } from "@phosphor-icons/react"
+import { GripVerticalIcon, CircleCheckIcon, LoaderIcon, EllipsisVerticalIcon, Columns3Icon, ChevronDownIcon, PlusIcon, ChevronsLeftIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsRightIcon, TrendingUpIcon } from "lucide-react"
 
 export const schema = z.object({
   id: z.number(),
@@ -109,7 +109,6 @@ function DragHandle({ id }: { id: number }) {
   const { attributes, listeners } = useSortable({
     id,
   })
-
   return (
     <Button
       {...attributes}
@@ -118,12 +117,11 @@ function DragHandle({ id }: { id: number }) {
       size="icon"
       className="size-7 text-muted-foreground hover:bg-transparent"
     >
-      <DotsSixVerticalIcon className="size-3 text-muted-foreground" />
+      <GripVerticalIcon className="size-3 text-muted-foreground" />
       <span className="sr-only">Drag to reorder</span>
     </Button>
   )
 }
-
 const columns: ColumnDef<z.infer<typeof schema>>[] = [
   {
     id: "drag",
@@ -135,9 +133,10 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     header: ({ table }) => (
       <div className="flex items-center justify-center">
         <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
+          checked={table.getIsAllPageRowsSelected()}
+          indeterminate={
+            table.getIsSomePageRowsSelected() &&
+            !table.getIsAllPageRowsSelected()
           }
           onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
           aria-label="Select all"
@@ -181,9 +180,9 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     cell: ({ row }) => (
       <Badge variant="outline" className="px-1.5 text-muted-foreground">
         {row.original.status === "Done" ? (
-          <CheckCircleIcon className="fill-green-500 dark:fill-green-400" />
+          <CircleCheckIcon className="fill-green-500 dark:fill-green-400" />
         ) : (
-          <SpinnerIcon
+          <LoaderIcon
           />
         )}
         {row.original.status}
@@ -245,17 +244,20 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     header: "Reviewer",
     cell: ({ row }) => {
       const isAssigned = row.original.reviewer !== "Assign reviewer"
-
       if (isAssigned) {
         return row.original.reviewer
       }
-
       return (
         <>
           <Label htmlFor={`${row.original.id}-reviewer`} className="sr-only">
             Reviewer
           </Label>
-          <Select>
+          <Select
+            items={[
+              { label: "Eddie Lake", value: "Eddie Lake" },
+              { label: "Jamik Tashpulatov", value: "Jamik Tashpulatov" },
+            ]}
+          >
             <SelectTrigger
               className="w-38 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate"
               size="sm"
@@ -280,16 +282,18 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     id: "actions",
     cell: () => (
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            className="flex size-8 text-muted-foreground data-[state=open]:bg-muted"
-            size="icon"
-          >
-            <DotsThreeVerticalIcon
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              className="flex size-8 text-muted-foreground data-open:bg-muted"
+              size="icon"
             />
-            <span className="sr-only">Open menu</span>
-          </Button>
+          }
+        >
+          <EllipsisVerticalIcon
+          />
+          <span className="sr-only">Open menu</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-32">
           <DropdownMenuItem>Edit</DropdownMenuItem>
@@ -302,12 +306,10 @@ const columns: ColumnDef<z.infer<typeof schema>>[] = [
     ),
   },
 ]
-
 function DraggableRow({ row }: { row: Row<z.infer<typeof schema>> }) {
   const { transform, transition, setNodeRef, isDragging } = useSortable({
     id: row.original.id,
   })
-
   return (
     <TableRow
       data-state={row.getIsSelected() && "selected"}
@@ -327,7 +329,6 @@ function DraggableRow({ row }: { row: Row<z.infer<typeof schema>> }) {
     </TableRow>
   )
 }
-
 export function DataTable({
   data: initialData,
 }: {
@@ -351,12 +352,10 @@ export function DataTable({
     useSensor(TouchSensor, {}),
     useSensor(KeyboardSensor, {})
   )
-
   const dataIds = React.useMemo<UniqueIdentifier[]>(
     () => data?.map(({ id }) => id) || [],
     [data]
   )
-
   const table = useReactTable({
     data,
     columns,
@@ -381,7 +380,6 @@ export function DataTable({
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
-
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
     if (active && over && active.id !== over.id) {
@@ -392,7 +390,6 @@ export function DataTable({
       })
     }
   }
-
   return (
     <Tabs
       defaultValue="outline"
@@ -402,7 +399,15 @@ export function DataTable({
         <Label htmlFor="view-selector" className="sr-only">
           View
         </Label>
-        <Select defaultValue="outline">
+        <Select
+          defaultValue="outline"
+          items={[
+            { label: "Outline", value: "outline" },
+            { label: "Past Performance", value: "past-performance" },
+            { label: "Key Personnel", value: "key-personnel" },
+            { label: "Focus Documents", value: "focus-documents" },
+          ]}
+        >
           <SelectTrigger
             className="flex w-fit @4xl/main:hidden"
             size="sm"
@@ -431,12 +436,12 @@ export function DataTable({
         </TabsList>
         <div className="flex items-center gap-2">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <ColumnsIcon data-icon="inline-start" />
-                Columns
-                <CaretDownIcon data-icon="inline-end" />
-              </Button>
+            <DropdownMenuTrigger
+              render={<Button variant="outline" size="sm" />}
+            >
+              <Columns3Icon data-icon="inline-start" />
+              Columns
+              <ChevronDownIcon data-icon="inline-end" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-32">
               {table
@@ -539,6 +544,10 @@ export function DataTable({
                 onValueChange={(value) => {
                   table.setPageSize(Number(value))
                 }}
+                items={[10, 20, 30, 40, 50].map((pageSize) => ({
+                  label: `${pageSize}`,
+                  value: `${pageSize}`,
+                }))}
               >
                 <SelectTrigger size="sm" className="w-20" id="rows-per-page">
                   <SelectValue
@@ -568,7 +577,7 @@ export function DataTable({
                 disabled={!table.getCanPreviousPage()}
               >
                 <span className="sr-only">Go to first page</span>
-                <CaretDoubleLeftIcon
+                <ChevronsLeftIcon
                 />
               </Button>
               <Button
@@ -579,7 +588,7 @@ export function DataTable({
                 disabled={!table.getCanPreviousPage()}
               >
                 <span className="sr-only">Go to previous page</span>
-                <CaretLeftIcon
+                <ChevronLeftIcon
                 />
               </Button>
               <Button
@@ -590,7 +599,7 @@ export function DataTable({
                 disabled={!table.getCanNextPage()}
               >
                 <span className="sr-only">Go to next page</span>
-                <CaretRightIcon
+                <ChevronRightIcon
                 />
               </Button>
               <Button
@@ -601,7 +610,7 @@ export function DataTable({
                 disabled={!table.getCanNextPage()}
               >
                 <span className="sr-only">Go to last page</span>
-                <CaretDoubleRightIcon
+                <ChevronsRightIcon
                 />
               </Button>
             </div>
@@ -626,16 +635,38 @@ export function DataTable({
     </Tabs>
   )
 }
-
 const chartData = [
-  { month: "January", desktop: 186, mobile: 80 },
-  { month: "February", desktop: 305, mobile: 200 },
-  { month: "March", desktop: 237, mobile: 120 },
-  { month: "April", desktop: 73, mobile: 190 },
-  { month: "May", desktop: 209, mobile: 130 },
-  { month: "June", desktop: 214, mobile: 140 },
+  {
+    month: "January",
+    desktop: 186,
+    mobile: 80,
+  },
+  {
+    month: "February",
+    desktop: 305,
+    mobile: 200,
+  },
+  {
+    month: "March",
+    desktop: 237,
+    mobile: 120,
+  },
+  {
+    month: "April",
+    desktop: 73,
+    mobile: 190,
+  },
+  {
+    month: "May",
+    desktop: 209,
+    mobile: 130,
+  },
+  {
+    month: "June",
+    desktop: 214,
+    mobile: 140,
+  },
 ]
-
 const chartConfig = {
   desktop: {
     label: "Desktop",
@@ -646,16 +677,12 @@ const chartConfig = {
     color: "var(--primary)",
   },
 } satisfies ChartConfig
-
 function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
   const isMobile = useIsMobile()
-
   return (
     <Drawer direction={isMobile ? "bottom" : "right"}>
       <DrawerTrigger asChild>
-        <Button variant="link" className="w-fit px-0 text-left text-foreground">
-          {item.header}
-        </Button>
+        <Button variant="link" className="w-fit px-0 text-left text-foreground">{item.header}</Button>
       </DrawerTrigger>
       <DrawerContent>
         <DrawerHeader className="gap-1">
@@ -711,7 +738,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
               <div className="grid gap-2">
                 <div className="flex gap-2 leading-none font-medium">
                   Trending up by 5.2% this month{" "}
-                  <TrendUpIcon className="size-4" />
+                  <TrendingUpIcon className="size-4" />
                 </div>
                 <div className="text-muted-foreground">
                   Showing total visitors for the last 6 months. This is just
@@ -730,7 +757,22 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-3">
                 <Label htmlFor="type">Type</Label>
-                <Select defaultValue={item.type}>
+                <Select
+                  defaultValue={item.type}
+                  items={[
+                    { label: "Table of Contents", value: "Table of Contents" },
+                    { label: "Executive Summary", value: "Executive Summary" },
+                    {
+                      label: "Technical Approach",
+                      value: "Technical Approach",
+                    },
+                    { label: "Design", value: "Design" },
+                    { label: "Capabilities", value: "Capabilities" },
+                    { label: "Focus Documents", value: "Focus Documents" },
+                    { label: "Narrative", value: "Narrative" },
+                    { label: "Cover Page", value: "Cover Page" },
+                  ]}
+                >
                   <SelectTrigger id="type" className="w-full">
                     <SelectValue placeholder="Select a type" />
                   </SelectTrigger>
@@ -758,7 +800,14 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
               </div>
               <div className="flex flex-col gap-3">
                 <Label htmlFor="status">Status</Label>
-                <Select defaultValue={item.status}>
+                <Select
+                  defaultValue={item.status}
+                  items={[
+                    { label: "Done", value: "Done" },
+                    { label: "In Progress", value: "In Progress" },
+                    { label: "Not Started", value: "Not Started" },
+                  ]}
+                >
                   <SelectTrigger id="status" className="w-full">
                     <SelectValue placeholder="Select a status" />
                   </SelectTrigger>
@@ -784,7 +833,14 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
             </div>
             <div className="flex flex-col gap-3">
               <Label htmlFor="reviewer">Reviewer</Label>
-              <Select defaultValue={item.reviewer}>
+              <Select
+                defaultValue={item.reviewer}
+                items={[
+                  { label: "Eddie Lake", value: "Eddie Lake" },
+                  { label: "Jamik Tashpulatov", value: "Jamik Tashpulatov" },
+                  { label: "Emily Whalen", value: "Emily Whalen" },
+                ]}
+              >
                 <SelectTrigger id="reviewer" className="w-full">
                   <SelectValue placeholder="Select a reviewer" />
                 </SelectTrigger>
@@ -804,7 +860,7 @@ function TableCellViewer({ item }: { item: z.infer<typeof schema> }) {
         <DrawerFooter>
           <Button>Submit</Button>
           <DrawerClose asChild>
-            <Button variant="outline">Done</Button>
+            <Button variant="outline">Close</Button>
           </DrawerClose>
         </DrawerFooter>
       </DrawerContent>
