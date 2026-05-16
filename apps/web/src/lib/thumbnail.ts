@@ -5,6 +5,7 @@ const MAX_SIZE = 100 * 1024
 const MIN_QUALITY = 0.5
 const START_QUALITY = 0.7
 const QUALITY_STEP = 0.1
+const TIMEOUT_MS = 30_000
 
 export async function generateThumbnail(
   file: File,
@@ -41,19 +42,74 @@ async function generateVideoThumbnail(
   maxWidth: number,
   maxSize: number
 ): Promise<{ blob: Blob; width: number; height: number }> {
-  const frameBlob = await extractVideoFrame(file, 0.5)
-  const img = await loadBlobAsImage(frameBlob)
-  const { width, height } = calculateDimensions(img.width, img.height, maxWidth)
+  try {
+    return await generateVideoThumbnailUsingCanvas(file, maxWidth, maxSize)
+  } catch {
+    const frameBlob = await extractVideoFrame(file, 0.5)
+    const img = await loadBlobAsImage(frameBlob)
+    const { width, height } = calculateDimensions(img.width, img.height, maxWidth)
 
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Failed to get canvas context")
+
+    ctx.drawImage(img, 0, 0, width, height)
+    return compressToSize(canvas, maxSize, width, height)
+  }
+}
+
+async function generateVideoThumbnailUsingCanvas(
+  file: File,
+  maxWidth: number,
+  maxSize: number
+): Promise<{ blob: Blob; width: number; height: number }> {
   const canvas = document.createElement("canvas")
-  canvas.width = width
-  canvas.height = height
-
   const ctx = canvas.getContext("2d")
   if (!ctx) throw new Error("Failed to get canvas context")
 
-  ctx.drawImage(img, 0, 0, width, height)
-  return compressToSize(canvas, maxSize, width, height)
+  const videoURL = URL.createObjectURL(file)
+
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      const video = document.createElement("video")
+      video.preload = "metadata"
+      video.muted = true
+      video.src = videoURL
+      video.addEventListener("loadeddata", () => {
+        try {
+          URL.revokeObjectURL(videoURL)
+          video.currentTime = Math.min(0.5, video.duration * 0.25)
+        } catch (e) {
+          reject(e)
+        }
+      })
+      video.addEventListener("seeked", () => {
+        try {
+          const { width, height } = calculateDimensions(
+            video.videoWidth,
+            video.videoHeight,
+            maxWidth
+          )
+          canvas.width = width
+          canvas.height = height
+          ctx.drawImage(video, 0, 0, width, height)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      })
+      video.addEventListener("error", () => {
+        URL.revokeObjectURL(videoURL)
+        reject(new Error("Video failed to load"))
+      })
+    }),
+    TIMEOUT_MS
+  )
+
+  return compressToSize(canvas, maxSize, canvas.width, canvas.height)
 }
 
 async function compressToSize(
@@ -113,4 +169,13 @@ function calculateDimensions(
     width: Math.round(w * ratio),
     height: Math.round(h * ratio),
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout")), ms)
+    ),
+  ])
 }
