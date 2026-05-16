@@ -25,6 +25,11 @@ pub struct LoginParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginParamsRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
     pub verify_key_hash: String,

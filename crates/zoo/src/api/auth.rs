@@ -8,12 +8,12 @@ use axum::Json;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use sha2::{Digest, Sha256};
 use types::error::{ApiError, ErrorCode, ErrorResponse};
-use types::user::{LoginParams, LoginRequest, LoginResponse, UserRegistration};
+use types::user::{LoginParams, LoginParamsRequest, LoginRequest, LoginResponse, UserRegistration};
 use uuid::Uuid;
 
 pub async fn get_login_params(
     State(state): State<AppState>,
-    Json(req): Json<LoginRequest>,
+    Json(req): Json<LoginParamsRequest>,
 ) -> Result<Json<LoginParams>, (StatusCode, Json<ErrorResponse>)> {
     let user = find_user_by_email(&state.pool, &req.email)
         .await
@@ -27,16 +27,11 @@ pub async fn get_login_params(
         })),
         None => {
             dummy_login_delay();
-            Err((
-                StatusCode::UNAUTHORIZED,
-                Json(ErrorResponse {
-                    error: ApiError {
-                        code: ErrorCode::Unauthorized,
-                        message: "invalid credentials".to_string(),
-                        details: None,
-                    },
-                }),
-            ))
+            Ok(Json(LoginParams {
+                kek_salt: generate_fake_salt(),
+                mem_limit: 67108864,
+                ops_limit: 2,
+            }))
         }
     }
 }
@@ -187,6 +182,13 @@ fn dummy_bcrypt() {
 
 fn dummy_login_delay() {
     std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
+fn generate_fake_salt() -> String {
+    use base64::Engine;
+    let mut bytes = [0u8; 16];
+    rand::fill(&mut bytes);
+    base64::engine::general_purpose::STANDARD.encode(&bytes)
 }
 
 fn internal_error(e: crate::error::ZooError) -> (StatusCode, Json<ErrorResponse>) {

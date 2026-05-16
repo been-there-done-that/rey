@@ -4,6 +4,7 @@ use axum::middleware;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use std::sync::Arc;
+use tower_http::cors::CorsLayer;
 
 pub mod auth;
 pub mod devices;
@@ -78,5 +79,6 @@ pub fn create_router(
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .layer(CorsLayer::permissive())
         .with_state(app_state)
 }

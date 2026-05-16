@@ -47,7 +47,7 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.6", features = ["trace", "cors"] }
 aws-sdk-s3 = "1"
 aws-config = "1"
 utoipa = { version = "5", features = ["axum_extras"] }
