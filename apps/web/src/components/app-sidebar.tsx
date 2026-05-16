@@ -26,7 +26,7 @@ const data = {
   navMain: [
     {
       title: "Dashboard",
-      url: "#",
+      url: "/d/home",
       icon: (
         <SquaresFourIcon
         />
