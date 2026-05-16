@@ -12,6 +12,7 @@ interface Check {
 
 export function DebugPanel() {
   const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [checks, setChecks] = useState<Check[]>([
     { label: "WASM init", status: "loading", detail: "checking..." },
     { label: "generate_key_b64", status: "loading", detail: "checking..." },
@@ -23,77 +24,87 @@ export function DebugPanel() {
     { label: "generate_keypair_b64", status: "loading", detail: "checking..." },
   ])
 
-  useEffect(() => {
-    async function runChecks() {
-      const results: Check[] = []
+  async function runChecks() {
+    const results: Check[] = []
+
+    try {
+      const wasm = await import("@/wasm-pkg/index")
+
+      results.push({ label: "WASM init", status: "ok", detail: "loaded" })
 
       try {
-        const wasm = await import("@/wasm-pkg/index")
-
-        results.push({ label: "WASM init", status: "ok", detail: "loaded" })
-
-        try {
-          const key = wasm.generate_key_b64()
-          results.push({ label: "generate_key_b64", status: "ok", detail: key.slice(0, 16) + "..." })
-        } catch (e) {
-          results.push({ label: "generate_key_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const salt = wasm.generate_salt_b64()
-          results.push({ label: "generate_salt_b64", status: "ok", detail: salt })
-        } catch (e) {
-          results.push({ label: "generate_salt_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const salt = wasm.generate_salt_b64()
-          const kek = wasm.derive_kek_b64("test", salt, 67108864, 2)
-          results.push({ label: "derive_kek_b64", status: "ok", detail: kek.slice(0, 16) + "..." })
-        } catch (e) {
-          results.push({ label: "derive_kek_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const kek = wasm.generate_key_b64()
-          const vk = wasm.derive_verification_key_b64(kek)
-          results.push({ label: "derive_verification_key_b64", status: "ok", detail: vk.slice(0, 16) + "..." })
-        } catch (e) {
-          results.push({ label: "derive_verification_key_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const vk = wasm.generate_key_b64()
-          const hash = wasm.bcrypt_hash_b64(vk)
-          results.push({ label: "bcrypt_hash_b64", status: "ok", detail: hash.slice(0, 20) + "..." })
-        } catch (e) {
-          results.push({ label: "bcrypt_hash_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const key = wasm.generate_key_b64()
-          const wrapping = wasm.generate_key_b64()
-          const enc = wasm.encrypt_key_b64(key, wrapping)
-          results.push({ label: "encrypt_key_b64", status: "ok", detail: JSON.parse(enc).nonce.slice(0, 16) + "..." })
-        } catch (e) {
-          results.push({ label: "encrypt_key_b64", status: "error", detail: String(e) })
-        }
-
-        try {
-          const kp = wasm.generate_keypair_b64()
-          results.push({ label: "generate_keypair_b64", status: "ok", detail: JSON.parse(kp).public_key.slice(0, 16) + "..." })
-        } catch (e) {
-          results.push({ label: "generate_keypair_b64", status: "error", detail: String(e) })
-        }
+        const key = wasm.generate_key_b64()
+        results.push({ label: "generate_key_b64", status: "ok", detail: key.slice(0, 16) + "..." })
       } catch (e) {
-        results.push({ label: "WASM init", status: "error", detail: String(e) })
+        results.push({ label: "generate_key_b64", status: "error", detail: String(e) })
       }
 
-      setChecks(results)
+      try {
+        const salt = wasm.generate_salt_b64()
+        results.push({ label: "generate_salt_b64", status: "ok", detail: salt })
+      } catch (e) {
+        results.push({ label: "generate_salt_b64", status: "error", detail: String(e) })
+      }
+
+      try {
+        const salt = wasm.generate_salt_b64()
+        const kek = wasm.derive_kek_b64("test", salt, 67108864, 2)
+        results.push({ label: "derive_kek_b64", status: "ok", detail: kek.slice(0, 16) + "..." })
+      } catch (e) {
+        results.push({ label: "derive_kek_b64", status: "error", detail: String(e) })
+      }
+
+      try {
+        const kek = wasm.generate_key_b64()
+        const vk = wasm.derive_verification_key_b64(kek)
+        results.push({ label: "derive_verification_key_b64", status: "ok", detail: vk.slice(0, 16) + "..." })
+      } catch (e) {
+        results.push({ label: "derive_verification_key_b64", status: "error", detail: String(e) })
+      }
+
+      try {
+        const vk = wasm.generate_key_b64()
+        const hash = wasm.bcrypt_hash_b64(vk)
+        results.push({ label: "bcrypt_hash_b64", status: "ok", detail: hash.slice(0, 20) + "..." })
+      } catch (e) {
+        results.push({ label: "bcrypt_hash_b64", status: "error", detail: String(e) })
+      }
+
+      try {
+        const key = wasm.generate_key_b64()
+        const wrapping = wasm.generate_key_b64()
+        const enc = wasm.encrypt_key_b64(key, wrapping)
+        results.push({ label: "encrypt_key_b64", status: "ok", detail: JSON.parse(enc).nonce.slice(0, 16) + "..." })
+      } catch (e) {
+        results.push({ label: "encrypt_key_b64", status: "error", detail: String(e) })
+      }
+
+      try {
+        const kp = wasm.generate_keypair_b64()
+        results.push({ label: "generate_keypair_b64", status: "ok", detail: JSON.parse(kp).public_key.slice(0, 16) + "..." })
+      } catch (e) {
+        results.push({ label: "generate_keypair_b64", status: "error", detail: String(e) })
+      }
+    } catch (e) {
+      results.push({ label: "WASM init", status: "error", detail: String(e) })
     }
 
+    setChecks(results)
+  }
+
+  useEffect(() => {
     runChecks()
   }, [])
+
+  function copyReport() {
+    const lines = checks.map((c) => {
+      const icon = c.status === "ok" ? "✓" : c.status === "error" ? "✕" : "◌"
+      return `${icon} ${c.label}: ${c.detail}`
+    })
+    navigator.clipboard.writeText(lines.join("\n"))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   if (!open) {
     return (
@@ -115,9 +126,23 @@ export function DebugPanel() {
         <span className="font-semibold">
           Debug ({oks}/{checks.length}) {errors > 0 && <span className="text-destructive">{errors} failed</span>}
         </span>
-        <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
-          ✕
-        </button>
+        <div className="flex gap-1">
+          <button
+            onClick={copyReport}
+            className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {copied ? "✓" : "📋"}
+          </button>
+          <button
+            onClick={runChecks}
+            className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            ↻
+          </button>
+          <button onClick={() => setOpen(false)} className="rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+            ✕
+          </button>
+        </div>
       </div>
       <div className="max-h-64 overflow-y-auto p-3">
         {checks.map((c) => (
