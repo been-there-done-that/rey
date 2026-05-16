@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { useAuth } from "@/lib/auth-store"
 import { fetchFiles, type GalleryFile } from "@/lib/gallery-api"
 import { decryptFileKey, decryptThumbnail } from "@/lib/file-viewer"
+import { PhotoViewer } from "@/components/photo-viewer"
 import { cn } from "@/lib/utils"
 import { Loader2Icon, ImageOffIcon } from "lucide-react"
 
@@ -29,6 +30,7 @@ function Tile({ file }: TileProps) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState(false)
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   useEffect(() => {
     if (!token || !masterKey || !file.encrypted_thumbnail || !file.thumb_decryption_header) return
@@ -60,7 +62,10 @@ function Tile({ file }: TileProps) {
     }
 
     loadThumbnail()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (thumbUrl) URL.revokeObjectURL(thumbUrl)
+    }
   }, [token, masterKey, file])
 
   const aspectRatio = file.thumbnail_size
@@ -68,36 +73,51 @@ function Tile({ file }: TileProps) {
     : 1
 
   return (
-    <div
-      className={cn(
-        "group relative overflow-hidden rounded-lg bg-muted",
-        loaded ? "opacity-100" : "opacity-0",
-        "transition-opacity duration-300"
-      )}
-      style={{ aspectRatio: `${aspectRatio}` }}
-    >
-      {thumbUrl && (
-        <img
-          src={thumbUrl}
-          alt=""
-          className="absolute inset-0 size-full object-cover"
-          onLoad={() => setLoaded(true)}
-          onError={() => setError(true)}
+    <>
+      <div
+        className={cn(
+          "group relative cursor-pointer overflow-hidden rounded-lg bg-muted",
+          loaded ? "opacity-100" : "opacity-0",
+          "transition-opacity duration-300"
+        )}
+        style={{ aspectRatio: `${aspectRatio}` }}
+        onClick={() => setViewerOpen(true)}
+      >
+        {thumbUrl && (
+          <img
+            src={thumbUrl}
+            alt=""
+            className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105"
+            onLoad={() => setLoaded(true)}
+            onError={() => setError(true)}
+          />
+        )}
+        {!loaded && !error && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground">
+            <ImageOffIcon className="size-6" />
+            <span className="text-[10px]">Failed to load</span>
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+      </div>
+
+      {viewerOpen && (
+        <PhotoViewer
+          fileId={file.id}
+          encryptedKey={file.encrypted_key}
+          keyNonce={file.key_decryption_nonce}
+          fileDecryptionHeader={file.file_decryption_header}
+          mimeType={file.mime_type}
+          thumbUrl={thumbUrl || undefined}
+          onClose={() => setViewerOpen(false)}
         />
       )}
-      {!loaded && !error && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
-        </div>
-      )}
-      {error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-muted-foreground">
-          <ImageOffIcon className="size-6" />
-          <span className="text-[10px]">Failed to load</span>
-        </div>
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-    </div>
+    </>
   )
 }
 
