@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, JetBrains_Mono, Inter, Roboto } from "next/font/goog
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { DebugPanel } from "@/components/debug-panel";
+import { WasmInit } from "@/components/wasm-init";
 
 const robotoHeading = Roboto({subsets:['latin'],variable:'--font-heading'});
 
@@ -36,6 +37,7 @@ export default function RootLayout({
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, jetbrainsMono.variable, "font-sans", inter.variable, robotoHeading.variable)}
     >
       <body className="h-screen overflow-hidden flex flex-col">
+        <WasmInit />
         {children}
         {process.env.NODE_ENV === "development" && <DebugPanel />}
       </body>

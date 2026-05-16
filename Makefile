@@ -32,12 +32,17 @@ gen-bindings:
 
 # Build WASM crypto module for browser
 # Outputs to apps/web/src/wasm/ which is imported by the Next.js frontend
+# Also copies .wasm to public/wasm/ for Turbopack-compatible serving
 wasm:
 	wasm-pack build crates/zoo-wasm --target web --out-dir apps/web/src/wasm --no-default-features
 	mv crates/zoo-wasm/apps/web/src/wasm apps/web/src/wasm 2>/dev/null || true
+	mkdir -p apps/web/public/wasm
+	cp apps/web/src/wasm/zoo_wasm_bg.wasm apps/web/public/wasm/
 
 # Clean and rebuild WASM from scratch
 wasm-clean:
-	rm -rf apps/web/src/wasm
+	rm -rf apps/web/src/wasm apps/web/public/wasm
 	wasm-pack build crates/zoo-wasm --target web --out-dir apps/web/src/wasm --no-default-features
 	mv crates/zoo-wasm/apps/web/src/wasm apps/web/src/wasm 2>/dev/null || true
+	mkdir -p apps/web/public/wasm
+	cp apps/web/src/wasm/zoo_wasm_bg.wasm apps/web/public/wasm/

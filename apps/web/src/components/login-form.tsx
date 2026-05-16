@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -35,11 +35,6 @@ export function LoginForm({
   const setToken = useAuth((s) => s.setToken)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [wasmLoading, setWasmLoading] = useState(true)
-
-  useEffect(() => {
-    deriveKek("", "").catch(() => {}).finally(() => setWasmLoading(false))
-  }, [])
 
   const {
     register,
@@ -112,8 +107,8 @@ export function LoginForm({
                 <FieldError errors={errors.password ? [errors.password] : []} />
               </Field>
               <Field>
-                <Button type="submit" disabled={loading || wasmLoading}>
-                  {wasmLoading ? "Loading..." : loading ? "Logging in..." : "Login"}
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Logging in..." : "Login"}
                 </Button>
                 <FieldDescription className="text-center">
                   Don&apos;t have an account?{" "}

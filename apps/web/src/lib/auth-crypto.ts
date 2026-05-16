@@ -1,42 +1,50 @@
-import {
-  generate_key_b64,
-  generate_keypair_b64,
-  generate_salt_b64,
-  derive_kek_b64,
-  derive_verification_key_b64,
-  bcrypt_hash_b64,
-  encrypt_key_b64,
-} from "@/wasm-pkg/index"
+import { initWasm, getWasm } from "./wasm-loader"
+
+let initPromise: Promise<void> | null = null
+
+async function ensureWasm() {
+  if (!initPromise) {
+    initPromise = initWasm()
+  }
+  return initPromise
+}
 
 export async function generateKey() {
-  return generate_key_b64()
+  await ensureWasm()
+  return getWasm().generate_key_b64()
 }
 
 export async function generateKeypair() {
-  return JSON.parse(generate_keypair_b64()) as {
+  await ensureWasm()
+  return JSON.parse(await getWasm().generate_keypair_b64()) as {
     public_key: string
     secret_key: string
   }
 }
 
 export async function generateSalt() {
-  return generate_salt_b64()
+  await ensureWasm()
+  return getWasm().generate_salt_b64()
 }
 
 export async function deriveKek(password: string, salt: string) {
-  return derive_kek_b64(password, salt, 67108864, 2)
+  await ensureWasm()
+  return getWasm().derive_kek_b64(password, salt, 67108864, 2)
 }
 
 export async function deriveVerificationKey(kek: string) {
-  return derive_verification_key_b64(kek)
+  await ensureWasm()
+  return getWasm().derive_verification_key_b64(kek)
 }
 
 export async function bcryptHash(plaintextB64: string) {
-  return bcrypt_hash_b64(plaintextB64)
+  await ensureWasm()
+  return getWasm().bcrypt_hash_b64(plaintextB64)
 }
 
 export async function encryptKey(plaintextB64: string, wrappingB64: string) {
-  return JSON.parse(encrypt_key_b64(plaintextB64, wrappingB64)) as {
+  await ensureWasm()
+  return JSON.parse(await getWasm().encrypt_key_b64(plaintextB64, wrappingB64)) as {
     nonce: string
     ciphertext: string
   }

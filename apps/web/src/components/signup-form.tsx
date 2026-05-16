@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -32,11 +32,6 @@ export function SignupForm({
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [wasmLoading, setWasmLoading] = useState(true)
-
-  useEffect(() => {
-    prepareSignup("", "").catch(() => {}).finally(() => setWasmLoading(false))
-  }, [])
 
   const {
     register,
@@ -115,8 +110,8 @@ export function SignupForm({
                 </FieldDescription>
               </Field>
               <Field>
-                <Button type="submit" disabled={loading || wasmLoading}>
-                  {wasmLoading ? "Loading..." : loading ? "Creating account..." : "Create Account"}
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Creating account..." : "Create Account"}
                 </Button>
                 <FieldDescription className="text-center">
                   Already have an account?{" "}
