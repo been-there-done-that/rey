@@ -34,6 +34,40 @@ pub fn build_complete_url(_client: &Client, bucket: &str, key: &str, upload_id: 
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_complete_url() {
+        let fake_client = Client::new();
+        let url = build_complete_url(
+            &fake_client,
+            "my-bucket",
+            "uploads/file.bin",
+            "abc123",
+        );
+        assert_eq!(
+            url,
+            "https://my-bucket.s3.amazonaws.com/uploads/file.bin?uploadId=abc123"
+        );
+    }
+
+    #[test]
+    fn test_build_complete_url_with_special_chars() {
+        let fake_client = Client::new();
+        let url = build_complete_url(
+            &fake_client,
+            "test-bucket",
+            "path/to/file with spaces.bin",
+            "upload-xyz",
+        );
+        assert!(url.contains("test-bucket"));
+        assert!(url.contains("upload-xyz"));
+        assert!(url.contains("file with spaces.bin"));
+    }
+}
+
 pub async fn presign_download(
     client: &Client,
     bucket: &str,
