@@ -21,9 +21,11 @@ export default function DashboardLayout({
         }
       >
         <AppSidebar variant="inset" />
-        <SidebarInset>
+        <SidebarInset className="h-svh overflow-hidden">
           <SiteHeader />
-          {children}
+          <div className="flex flex-1 flex-col overflow-y-auto">
+            {children}
+          </div>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

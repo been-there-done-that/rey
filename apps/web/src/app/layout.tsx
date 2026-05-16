@@ -34,7 +34,7 @@ export default function RootLayout({
       lang="en"
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, jetbrainsMono.variable, "font-sans", inter.variable, robotoHeading.variable)}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="h-screen overflow-hidden flex flex-col">{children}</body>
     </html>
   );
 }
