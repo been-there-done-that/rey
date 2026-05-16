@@ -108,8 +108,7 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<UserRegistration>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
-    crate::validation::validate_email(&req.email)
-        .map_err(|e| validation_error(e.to_string()))?;
+    crate::validation::validate_email(&req.email).map_err(|e| validation_error(e.to_string()))?;
 
     register_user(
         &state.pool,

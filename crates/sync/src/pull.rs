@@ -5,9 +5,9 @@ use crate::error::SyncError;
 use crate::thumbnails;
 use base64::Engine;
 use crypto::Key256;
-use local_db::LocalDb;
 use local_db::collections;
 use local_db::files;
+use local_db::LocalDb;
 use std::sync::Arc;
 use thumbnail::cache::ThumbnailCache;
 use tokio::sync::RwLock;
@@ -35,8 +35,9 @@ pub async fn sync_all(engine: &SyncEngine) -> Result<(), SyncError> {
 }
 
 async fn sync_collections(engine: &SyncEngine) -> Result<(), SyncError> {
-    let since =
-        cursor::read_cursor(&engine.local_db, "collections_since").unwrap_or(Some(0)).unwrap_or(0);
+    let since = cursor::read_cursor(&engine.local_db, "collections_since")
+        .unwrap_or(Some(0))
+        .unwrap_or(0);
 
     let mut current_since = since;
 
@@ -48,14 +49,16 @@ async fn sync_collections(engine: &SyncEngine) -> Result<(), SyncError> {
         }
 
         let master_key = engine.master_key.read().await;
-        let mk = master_key
-            .as_ref()
-            .ok_or(SyncError::NetworkError(zoo_client::ZooError::NotAuthenticated))?;
+        let mk = master_key.as_ref().ok_or(SyncError::NetworkError(
+            zoo_client::ZooError::NotAuthenticated,
+        ))?;
 
         for coll in &page.collections {
             let encrypted_name_bytes = base64::prelude::BASE64_STANDARD
                 .decode(&coll.encrypted_name)
-                .map_err(|e| SyncError::ParseError(format!("base64 decode encrypted_name: {}", e)))?;
+                .map_err(|e| {
+                    SyncError::ParseError(format!("base64 decode encrypted_name: {}", e))
+                })?;
 
             let name_nonce_bytes = base64::prelude::BASE64_STANDARD
                 .decode(&coll.name_decryption_nonce)
@@ -69,13 +72,10 @@ async fn sync_collections(engine: &SyncEngine) -> Result<(), SyncError> {
                 &encrypted_name_bytes,
                 mk,
             )
-            .map_err(|e| {
-                SyncError::ParseError(format!("decrypt collection name: {}", e))
-            })?;
+            .map_err(|e| SyncError::ParseError(format!("decrypt collection name: {}", e)))?;
 
-            let name = String::from_utf8(decrypted_name).map_err(|e| {
-                SyncError::ParseError(format!("collection name not utf8: {}", e))
-            })?;
+            let name = String::from_utf8(decrypted_name)
+                .map_err(|e| SyncError::ParseError(format!("collection name not utf8: {}", e)))?;
 
             let record = Collection {
                 id: coll.id.clone(),
@@ -131,7 +131,8 @@ async fn sync_files(engine: &SyncEngine) -> Result<(), SyncError> {
                 break;
             }
 
-            let decrypted = decrypt::batch_decrypt_files(&page.updated_files, &Key256::new([0u8; 32]))?;
+            let decrypted =
+                decrypt::batch_decrypt_files(&page.updated_files, &Key256::new([0u8; 32]))?;
 
             if !decrypted.is_empty() {
                 files::upsert_files(&engine.local_db.conn, &decrypted)
@@ -167,8 +168,9 @@ async fn sync_files(engine: &SyncEngine) -> Result<(), SyncError> {
 }
 
 async fn sync_trash(engine: &SyncEngine) -> Result<(), SyncError> {
-    let since =
-        cursor::read_cursor(&engine.local_db, "trash_since").unwrap_or(Some(0)).unwrap_or(0);
+    let since = cursor::read_cursor(&engine.local_db, "trash_since")
+        .unwrap_or(Some(0))
+        .unwrap_or(0);
 
     let mut current_since = since;
 
@@ -182,20 +184,15 @@ async fn sync_trash(engine: &SyncEngine) -> Result<(), SyncError> {
         let file_ids: Vec<i64> = page.deleted_files.iter().map(|f| f.file_id).collect();
 
         if !file_ids.is_empty() {
-            files::archive_files(&engine.local_db.conn, &file_ids)
-                .map_err(SyncError::DbError)?;
+            files::archive_files(&engine.local_db.conn, &file_ids).map_err(SyncError::DbError)?;
         }
 
         for deleted in &page.deleted_files {
             current_since = deleted.updation_time;
         }
 
-        cursor::write_cursor(
-            &engine.local_db,
-            "trash_since",
-            page.latest_updated_at,
-        )
-        .map_err(|e| SyncError::CursorError(e.to_string()))?;
+        cursor::write_cursor(&engine.local_db, "trash_since", page.latest_updated_at)
+            .map_err(|e| SyncError::CursorError(e.to_string()))?;
 
         if !page.has_more {
             break;

@@ -1,7 +1,7 @@
-use zoo_client::error::ZooError;
-use zoo_client::upload::{s3_put_part, s3_complete};
 use zoo_client::download::{download_file, get_thumbnail};
+use zoo_client::error::ZooError;
 use zoo_client::sse::SseClient;
+use zoo_client::upload::{s3_complete, s3_put_part};
 use zoo_client::ZooClient;
 
 #[tokio::test]
@@ -72,14 +72,16 @@ async fn test_zoo_client_get_thumbnail_not_authenticated() {
 #[tokio::test]
 async fn test_zoo_client_upload_file_not_authenticated() {
     let client = ZooClient::new("http://localhost:3000".to_string());
-    let result = client.upload_file(
-        &[],
-        "hash",
-        vec!["d41d8cd98f00b204e9800998ecf8427e".to_string()],
-        0,
-        "application/octet-stream",
-        "collection",
-    ).await;
+    let result = client
+        .upload_file(
+            &[],
+            "hash",
+            vec!["d41d8cd98f00b204e9800998ecf8427e".to_string()],
+            0,
+            "application/octet-stream",
+            "collection",
+        )
+        .await;
     assert!(result.is_err());
     match result.unwrap_err() {
         ZooError::NotAuthenticated => {}
@@ -113,24 +115,14 @@ async fn test_s3_complete_invalid_url() {
 #[tokio::test]
 async fn test_download_file_invalid_url() {
     let client = reqwest::Client::new();
-    let result = download_file(
-        "http://invalid-host-12345",
-        "token",
-        1,
-        &client,
-    ).await;
+    let result = download_file("http://invalid-host-12345", "token", 1, &client).await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_get_thumbnail_invalid_url() {
     let client = reqwest::Client::new();
-    let result = get_thumbnail(
-        "http://invalid-host-12345",
-        "token",
-        1,
-        &client,
-    ).await;
+    let result = get_thumbnail("http://invalid-host-12345", "token", 1, &client).await;
     assert!(result.is_err());
 }
 
@@ -149,7 +141,10 @@ fn test_zoo_error_display() {
     assert_eq!(err.to_string(), "upload was aborted by GC or manual action");
 
     let err = ZooError::StateError("invalid transition".to_string());
-    assert_eq!(err.to_string(), "invalid state transition: invalid transition");
+    assert_eq!(
+        err.to_string(),
+        "invalid state transition: invalid transition"
+    );
 
     let err = ZooError::ParseError("invalid json".to_string());
     assert_eq!(err.to_string(), "parse error: invalid json");

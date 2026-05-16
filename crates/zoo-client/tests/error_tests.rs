@@ -15,7 +15,10 @@ fn test_zoo_error_upload_aborted() {
 #[test]
 fn test_zoo_error_state_error() {
     let err = ZooError::StateError("invalid transition".to_string());
-    assert_eq!(err.to_string(), "invalid state transition: invalid transition");
+    assert_eq!(
+        err.to_string(),
+        "invalid state transition: invalid transition"
+    );
 }
 
 #[test]

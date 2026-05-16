@@ -90,13 +90,15 @@ impl ZooClient {
 
         let upload_id_str = upload_id.to_string();
 
-        self.patch_upload(&token, &upload_id_str, "encrypting").await?;
+        self.patch_upload(&token, &upload_id_str, "encrypting")
+            .await?;
 
         let presign_resp = self
             .presign_urls(&token, &upload_id_str, &part_md5s)
             .await?;
 
-        self.patch_upload(&token, &upload_id_str, "uploading").await?;
+        self.patch_upload(&token, &upload_id_str, "uploading")
+            .await?;
 
         let etags = self
             .upload_parts_with_heartbeat(
@@ -135,9 +137,7 @@ impl ZooClient {
             return Err(ZooError::UploadAborted);
         }
 
-        let presign_resp = self
-            .presign_refresh(&token, &upload_id.to_string())
-            .await?;
+        let presign_resp = self.presign_refresh(&token, &upload_id.to_string()).await?;
 
         let missing_parts = self.find_missing_parts(&state, source_bytes.len())?;
 
@@ -185,10 +185,7 @@ impl ZooClient {
 
     pub async fn cancel_upload(&self, upload_id: Uuid) -> Result<(), ZooError> {
         let token = self.get_token().await?;
-        let url = format!(
-            "{}/api/uploads/{}",
-            self.inner.base_url, upload_id
-        );
+        let url = format!("{}/api/uploads/{}", self.inner.base_url, upload_id);
         let resp = self
             .inner
             .client
@@ -212,24 +209,12 @@ impl ZooClient {
 
     pub async fn download_file(&self, file_id: i64) -> Result<Vec<u8>, ZooError> {
         let token = self.get_token().await?;
-        download::download_file(
-            &self.inner.base_url,
-            &token,
-            file_id,
-            &self.inner.client,
-        )
-        .await
+        download::download_file(&self.inner.base_url, &token, file_id, &self.inner.client).await
     }
 
     pub async fn get_thumbnail(&self, file_id: i64) -> Result<Vec<u8>, ZooError> {
         let token = self.get_token().await?;
-        download::get_thumbnail(
-            &self.inner.base_url,
-            &token,
-            file_id,
-            &self.inner.client,
-        )
-        .await
+        download::get_thumbnail(&self.inner.base_url, &token, file_id, &self.inner.client).await
     }
 
     async fn create_upload(
@@ -267,7 +252,9 @@ impl ZooClient {
             let existing_id = body["upload_id"]
                 .as_str()
                 .and_then(|s| Uuid::parse_str(s).ok())
-                .ok_or_else(|| ZooError::Conflict("duplicate upload, no ID returned".to_string()))?;
+                .ok_or_else(|| {
+                    ZooError::Conflict("duplicate upload, no ID returned".to_string())
+                })?;
             return Err(ZooError::Conflict(format!(
                 "duplicate upload: {}",
                 existing_id
@@ -320,10 +307,7 @@ impl ZooClient {
         upload_id: &str,
         part_md5s: &[String],
     ) -> Result<PresignResponse, ZooError> {
-        let url = format!(
-            "{}/api/uploads/{}/presign",
-            self.inner.base_url, upload_id
-        );
+        let url = format!("{}/api/uploads/{}/presign", self.inner.base_url, upload_id);
         let body = serde_json::json!({ "part_md5s": part_md5s });
 
         let resp = self
@@ -406,10 +390,7 @@ impl ZooClient {
     }
 
     async fn register_upload(&self, token: &str, upload_id: &str) -> Result<i64, ZooError> {
-        let url = format!(
-            "{}/api/uploads/{}/register",
-            self.inner.base_url, upload_id
-        );
+        let url = format!("{}/api/uploads/{}/register", self.inner.base_url, upload_id);
 
         let resp = self
             .inner
@@ -430,9 +411,9 @@ impl ZooClient {
         }
 
         let result: serde_json::Value = resp.json().await.map_err(ZooError::HttpError)?;
-        let file_id = result["file_id"]
-            .as_i64()
-            .ok_or_else(|| ZooError::ParseError("missing file_id in register response".to_string()))?;
+        let file_id = result["file_id"].as_i64().ok_or_else(|| {
+            ZooError::ParseError("missing file_id in register response".to_string())
+        })?;
 
         Ok(file_id)
     }

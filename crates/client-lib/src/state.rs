@@ -35,7 +35,9 @@ pub struct AppState {
 
 impl AppState {
     pub async fn init(config: AppConfig) -> Result<Self, AppError> {
-        let db = Arc::new(tokio::sync::Mutex::new(LocalDb::open(Path::new(&config.db_path))?));
+        let db = Arc::new(tokio::sync::Mutex::new(LocalDb::open(Path::new(
+            &config.db_path,
+        ))?));
 
         let cache_dir = config.cache_dir.join("thumbnails");
         std::fs::create_dir_all(&cache_dir).ok();

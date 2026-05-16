@@ -532,10 +532,7 @@ pub async fn presign(
     .await
     .map_err(internal_error)?;
 
-    Ok(Json(PresignResponse {
-        urls,
-        complete_url,
-    }))
+    Ok(Json(PresignResponse { urls, complete_url }))
 }
 
 pub async fn presign_refresh(
@@ -622,10 +619,7 @@ pub async fn presign_refresh(
     .await
     .map_err(internal_error)?;
 
-    Ok(Json(PresignResponse {
-        urls,
-        complete_url,
-    }))
+    Ok(Json(PresignResponse { urls, complete_url }))
 }
 
 pub async fn cancel(
@@ -691,9 +685,10 @@ pub async fn list_pending(
     axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
     axum::extract::Query(query): axum::extract::Query<ListQueryParams>,
 ) -> Result<Json<Vec<UploadState>>, (StatusCode, Json<ErrorResponse>)> {
-    let uploads = crate::db::uploads::list_uploads_for_user(&state.pool, user_id, query.status.as_deref())
-        .await
-        .map_err(internal_error)?;
+    let uploads =
+        crate::db::uploads::list_uploads_for_user(&state.pool, user_id, query.status.as_deref())
+            .await
+            .map_err(internal_error)?;
 
     let states: Vec<UploadState> = uploads.into_iter().map(upload_to_state).collect();
     Ok(Json(states))

@@ -8,10 +8,9 @@ pub async fn fetch_collection_page(
     client: &ZooClient,
     since: i64,
 ) -> Result<SyncCollectionResponse, SyncError> {
-    let token = client
-        .session_token()
-        .await
-        .ok_or(SyncError::NetworkError(zoo_client::ZooError::NotAuthenticated))?;
+    let token = client.session_token().await.ok_or(SyncError::NetworkError(
+        zoo_client::ZooError::NotAuthenticated,
+    ))?;
 
     let url = format!(
         "{}/api/sync/collections?since={}&limit={}",
@@ -44,10 +43,9 @@ pub async fn fetch_file_page(
     collection_id: &str,
     since: i64,
 ) -> Result<SyncFilesResponse, SyncError> {
-    let token = client
-        .session_token()
-        .await
-        .ok_or(SyncError::NetworkError(zoo_client::ZooError::NotAuthenticated))?;
+    let token = client.session_token().await.ok_or(SyncError::NetworkError(
+        zoo_client::ZooError::NotAuthenticated,
+    ))?;
 
     let url = format!(
         "{}/api/sync/files?collection_id={}&since={}&limit={}",
@@ -71,8 +69,7 @@ pub async fn fetch_file_page(
         )));
     }
 
-    let result: SyncFilesResponse =
-        resp.json().await.map_err(zoo_client::ZooError::HttpError)?;
+    let result: SyncFilesResponse = resp.json().await.map_err(zoo_client::ZooError::HttpError)?;
     Ok(result)
 }
 
@@ -80,10 +77,9 @@ pub async fn fetch_trash_page(
     client: &ZooClient,
     since: i64,
 ) -> Result<SyncTrashResponse, SyncError> {
-    let token = client
-        .session_token()
-        .await
-        .ok_or(SyncError::NetworkError(zoo_client::ZooError::NotAuthenticated))?;
+    let token = client.session_token().await.ok_or(SyncError::NetworkError(
+        zoo_client::ZooError::NotAuthenticated,
+    ))?;
 
     let url = format!(
         "{}/api/sync/trash?since={}&limit={}",
@@ -106,7 +102,6 @@ pub async fn fetch_trash_page(
         )));
     }
 
-    let result: SyncTrashResponse =
-        resp.json().await.map_err(zoo_client::ZooError::HttpError)?;
+    let result: SyncTrashResponse = resp.json().await.map_err(zoo_client::ZooError::HttpError)?;
     Ok(result)
 }
