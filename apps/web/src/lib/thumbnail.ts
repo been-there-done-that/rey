@@ -1,4 +1,5 @@
 import { extractVideoFrame, isVideoFile } from "./ffmpeg-store"
+import heicConvert from "heic-convert"
 
 const MAX_DIMENSION = 720
 const MAX_SIZE = 100 * 1024
@@ -6,6 +7,12 @@ const MIN_QUALITY = 0.5
 const START_QUALITY = 0.7
 const QUALITY_STEP = 0.1
 const TIMEOUT_MS = 30_000
+
+const HEIC_EXTENSIONS = new Set([".heic", ".heif"])
+
+function isHEICExtension(extension: string): boolean {
+  return HEIC_EXTENSIONS.has(extension.toLowerCase())
+}
 
 export async function generateThumbnail(
   file: File,
@@ -23,7 +30,14 @@ async function generateImageThumbnail(
   maxWidth: number,
   maxSize: number
 ): Promise<{ blob: Blob; width: number; height: number }> {
-  const img = await loadImage(file)
+  const extension = "." + file.name.split(".").pop()
+  let blob: Blob = file
+
+  if (isHEICExtension(extension)) {
+    blob = await convertHEICToJPEG(file)
+  }
+
+  const img = await loadImage(blob)
   const { width, height } = calculateDimensions(img.width, img.height, maxWidth)
 
   const canvas = document.createElement("canvas")
@@ -37,14 +51,18 @@ async function generateImageThumbnail(
   return compressToSize(canvas, maxSize, width, height)
 }
 
+async function convertHEICToJPEG(file: File): Promise<Blob> {
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  const result = await heicConvert({ buffer, format: "JPEG" })
+  return new Blob([new Uint8Array(result)], { type: "image/jpeg" })
+}
+
 async function generateVideoThumbnail(
   file: File,
   maxWidth: number,
   maxSize: number
 ): Promise<{ blob: Blob; width: number; height: number }> {
   try {
-    return await generateVideoThumbnailUsingCanvas(file, maxWidth, maxSize)
-  } catch {
     const frameBlob = await extractVideoFrame(file, 0.5)
     const img = await loadBlobAsImage(frameBlob)
     const { width, height } = calculateDimensions(img.width, img.height, maxWidth)
@@ -58,6 +76,8 @@ async function generateVideoThumbnail(
 
     ctx.drawImage(img, 0, 0, width, height)
     return compressToSize(canvas, maxSize, width, height)
+  } catch {
+    return generateVideoThumbnailUsingCanvas(file, maxWidth, maxSize)
   }
 }
 
@@ -139,12 +159,12 @@ async function compressToSize(
   return { blob, width, height }
 }
 
-function loadImage(file: File): Promise<HTMLImageElement> {
+function loadImage(blob: Blob): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error("Failed to load image"))
-    img.src = URL.createObjectURL(file)
+    img.src = URL.createObjectURL(blob)
   })
 }
 
