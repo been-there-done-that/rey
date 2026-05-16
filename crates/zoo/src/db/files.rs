@@ -91,6 +91,28 @@ pub async fn list_files_for_sync(
     Ok(files)
 }
 
+pub async fn list_files_for_user(
+    pool: &PgPool,
+    user_id: Uuid,
+    since_time: i64,
+    limit: i64,
+) -> Result<Vec<FileRecord>, ZooError> {
+    let since = chrono::DateTime::from_timestamp_millis(since_time)
+        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+
+    let files = sqlx::query_as::<_, FileRecord>(
+        "SELECT * FROM files WHERE user_id = $1 AND updation_time > $2 AND archived_at IS NULL
+         ORDER BY created_at DESC LIMIT $3",
+    )
+    .bind(user_id)
+    .bind(since)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(files)
+}
+
 pub async fn archive_file(pool: &PgPool, user_id: Uuid, file_id: i64) -> Result<(), ZooError> {
     let result = sqlx::query(
         "UPDATE files SET archived_at = NOW(), updation_time = NOW()

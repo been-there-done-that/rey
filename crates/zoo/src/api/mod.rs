@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 pub mod auth;
+pub mod collections;
 pub mod devices;
 pub mod events;
 pub mod files;
@@ -34,6 +35,11 @@ pub fn create_router(
     let protected_routes = Router::new()
         .route("/api/auth/me", get(auth::me))
         .route("/api/auth/logout", post(auth::logout))
+        .route("/api/collections", get(collections::list))
+        .route("/api/collections", post(collections::create))
+        .route("/api/collections/{collection_id}", put(collections::update))
+        .route("/api/collections/{collection_id}", delete(collections::delete))
+        .route("/api/files", get(files::list))
         .route("/api/devices", post(devices::register))
         .route("/api/devices/{device_id}", delete(devices::deregister))
         .route(

@@ -101,3 +101,15 @@ pub struct FileRecord {
     pub updation_time: DateTime<Utc>,
     pub archived_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub encrypted_name: String,
+    pub encrypted_key: String,
+    pub key_decryption_nonce: String,
+    pub encrypted_metadata: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updation_time: DateTime<Utc>,
+}

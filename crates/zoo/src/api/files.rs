@@ -1,5 +1,5 @@
 use crate::config::DownloadMode;
-use crate::db::files::{archive_file, get_file_for_download};
+use crate::db::files::{archive_file, get_file_for_download, list_files_for_user};
 use crate::s3::presigner::presign_download;
 use crate::state::AppState;
 use axum::extract::State;
@@ -83,6 +83,67 @@ pub async fn archive(
             _ => internal_error(e),
         })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn list(
+    State(state): State<AppState>,
+    axum::extract::Extension(user_id): axum::extract::Extension<Uuid>,
+    axum::extract::Query(query): axum::extract::Query<ListQuery>,
+) -> Result<Json<Vec<FileItem>>, (StatusCode, Json<ErrorResponse>)> {
+    let since = query.since_time.unwrap_or(0);
+    let limit = query.limit.unwrap_or(100);
+    let files = list_files_for_user(&state.pool, user_id, since, limit)
+        .await
+        .map_err(internal_error)?;
+
+    let items = files
+        .into_iter()
+        .map(|f| FileItem {
+            id: f.id,
+            collection_id: f.collection_id,
+            encrypted_key: f.encrypted_key,
+            key_decryption_nonce: f.key_decryption_nonce,
+            file_decryption_header: f.file_decryption_header,
+            thumb_decryption_header: f.thumb_decryption_header,
+            encrypted_metadata: f.encrypted_metadata,
+            encrypted_thumbnail: f.encrypted_thumbnail,
+            thumbnail_size: f.thumbnail_size,
+            file_size: f.file_size,
+            mime_type: f.mime_type,
+            content_hash: f.content_hash,
+            created_at: f.created_at.timestamp_millis(),
+            updation_time: f.updation_time.timestamp_millis(),
+            archived_at: f.archived_at.map(|t| t.timestamp_millis()),
+        })
+        .collect();
+
+    Ok(Json(items))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ListQuery {
+    pub collection_id: Option<String>,
+    pub since_time: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct FileItem {
+    pub id: i64,
+    pub collection_id: String,
+    pub encrypted_key: String,
+    pub key_decryption_nonce: String,
+    pub file_decryption_header: String,
+    pub thumb_decryption_header: Option<String>,
+    pub encrypted_metadata: String,
+    pub encrypted_thumbnail: Option<String>,
+    pub thumbnail_size: Option<i32>,
+    pub file_size: i64,
+    pub mime_type: String,
+    pub content_hash: String,
+    pub created_at: i64,
+    pub updation_time: i64,
+    pub archived_at: Option<i64>,
 }
 
 fn internal_error(e: crate::error::ZooError) -> (StatusCode, Json<ErrorResponse>) {
