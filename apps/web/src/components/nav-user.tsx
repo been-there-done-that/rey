@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import {
   Avatar,
   AvatarFallback,
@@ -21,6 +22,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { EllipsisVerticalIcon, CircleUserRoundIcon, CreditCardIcon, BellIcon, LogOutIcon } from "lucide-react"
+import { useAuth } from "@/lib/auth-store"
+import { authApi } from "@/lib/api"
 
 export function NavUser({
   user,
@@ -32,6 +35,22 @@ export function NavUser({
   }
 }) {
   const { isMobile } = useSidebar()
+  const router = useRouter()
+  const token = useAuth((s) => s.token)
+  const logout = useAuth((s) => s.logout)
+
+  async function handleLogout() {
+    if (token) {
+      try {
+        await authApi(token).post("api/auth/logout")
+      } catch {
+        // ignore errors during logout
+      }
+    }
+    logout()
+    router.push("/login")
+  }
+
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -94,7 +113,7 @@ export function NavUser({
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={handleLogout}>
               <LogOutIcon
               />
               Log out
