@@ -100,6 +100,11 @@ export class UploadManager {
     const partCount = Math.ceil(totalSize / CHUNK_SIZE)
     const partMd5s = Array(partCount).fill("")
 
+    const deviceId = localStorage.getItem("device_id") || crypto.randomUUID()
+    if (!localStorage.getItem("device_id")) {
+      localStorage.setItem("device_id", deviceId)
+    }
+
     const uploadInit = await authApi(token)
       .post("api/uploads", {
         json: {
@@ -110,15 +115,19 @@ export class UploadManager {
           part_count: partCount,
           part_md5s: partMd5s,
         },
+        headers: { "x-device-id": deviceId },
       })
       .json<{
         upload_id: string
-        object_key: string
-        upload_id_s3: string
-        complete_url: string
-        urls: string[]
-        urls_expire_at: number
+        status: string
       }>()
+
+    // Fetch presigned URLs
+    const presignRes = await authApi(token)
+      .post(`api/uploads/${uploadInit.upload_id}/presign`, {
+        json: { part_md5s: partMd5s },
+      })
+      .json<{ urls: string[]; complete_url: string }>()
 
     // Step 4: Upload encrypted chunks to presigned URLs
     const ciphertextBytes = base64ToArrayBuffer(fileEnc.ciphertext)
@@ -127,7 +136,7 @@ export class UploadManager {
       const end = Math.min(start + CHUNK_SIZE, ciphertextBytes.byteLength)
       const chunk = ciphertextBytes.slice(start, end)
 
-      const url = uploadInit.urls[i]
+      const url = presignRes.urls[i]
       await fetch(url, {
         method: "PUT",
         body: chunk,
