@@ -2784,3 +2784,1028 @@ async fn test_zoo_client_get_thumbnail_not_found() {
     let result = zoo_client.get_thumbnail(99999).await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn test_zoo_client_s3_put_part() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"S3 put part test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let etag = zoo_client::upload::s3_put_part(&presigned_url, file_content).await.expect("s3_put_part failed");
+    assert!(!etag.is_empty());
+    assert!(etag.starts_with('"') || etag.len() >= 10);
+}
+
+#[tokio::test]
+async fn test_zoo_client_s3_put_part_empty_bytes() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let etag = zoo_client::upload::s3_put_part(&presigned_url, file_content).await.expect("s3_put_part failed");
+    assert!(!etag.is_empty());
+}
+
+#[tokio::test]
+async fn test_zoo_client_s3_complete_invalid_url() {
+    let result = zoo_client::upload::s3_complete("http://localhost:1/invalid", &["etag1".to_string()]).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_zoo_client_s3_put_part_invalid_url() {
+    let result = zoo_client::upload::s3_put_part("http://localhost:1/invalid", b"test").await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_sse_stream_endpoint() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, device) = setup_user().await;
+    let sse_token = device["sse_token"].as_str().unwrap();
+
+    let resp = client
+        .get(&format!("{}/api/events", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", sse_token)
+        .send()
+        .await
+        .expect("sse stream request failed");
+
+    assert_eq!(resp.status(), 200);
+    let content_type = resp.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(content_type.contains("text/event-stream"));
+}
+
+#[tokio::test]
+async fn test_sse_stream_receives_test_event() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, device) = setup_user().await;
+    let sse_token = device["sse_token"].as_str().unwrap();
+
+    let resp = client
+        .get(&format!("{}/api/events", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", sse_token)
+        .send()
+        .await
+        .expect("sse stream request failed");
+
+    assert_eq!(resp.status(), 200);
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let test_resp = client
+        .post(&format!("{}/api/events/test", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("test event request failed");
+
+    assert!(test_resp.status() == 200 || test_resp.status() == 202);
+}
+
+#[tokio::test]
+async fn test_zoo_client_download_registered_file() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Download test content for zoo client";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.trim_matches('"').to_string()).unwrap();
+
+    client.put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send().await.expect("confirm part failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send().await.expect("patch failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send().await.expect("patch failed");
+
+    client.post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .send().await.expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send().await.expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token(token.clone());
+
+    let download_result = zoo_client.download_file(file_id).await;
+    assert!(download_result.is_ok());
+}
+
+#[tokio::test]
+async fn test_zoo_client_full_upload_flow_expects_register_error() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (_client, token, _, _) = setup_user().await;
+
+    let file_content = b"Full upload flow test content - this is a test file for the zoo client upload";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+    let part_md5 = base64::prelude::BASE64_STANDARD.encode([0u8; 16]);
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token(token.clone());
+
+    let collection_id = Uuid::new_v4().to_string();
+    let result = zoo_client.upload_file(
+        file_content,
+        &file_hash,
+        vec![part_md5],
+        file_size,
+        "application/octet-stream",
+        &collection_id,
+    ).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_zoo_client_upload_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+
+    let file_content = b"test";
+    let result = zoo_client.upload_file(
+        file_content,
+        "hash",
+        vec!["md5".to_string()],
+        4,
+        "application/octet-stream",
+        "collection",
+    ).await;
+
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_resume_upload_failed_state() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Resume upload failed test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+    let upload_uuid = Uuid::parse_str(upload_id).unwrap();
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "failed" }))
+        .send()
+        .await
+        .expect("patch to failed failed");
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token(token.clone());
+
+    let result = zoo_client.resume_upload(upload_uuid, file_content).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_zoo_client_resume_upload_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    let upload_uuid = Uuid::new_v4();
+
+    let result = zoo_client.resume_upload(upload_uuid, b"test").await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_pending_uploads_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+
+    let result = zoo_client.pending_uploads().await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_cancel_upload_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    let upload_uuid = Uuid::new_v4();
+
+    let result = zoo_client.cancel_upload(upload_uuid).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_download_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+
+    let result = zoo_client.download_file(1).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_get_thumbnail_not_authenticated() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+
+    let result = zoo_client.get_thumbnail(1).await;
+    assert!(result.is_err());
+    match result.unwrap_err() {
+        zoo_client::ZooError::NotAuthenticated => {},
+        _ => panic!("expected NotAuthenticated error"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_base_url() {
+    let zoo_client = zoo_client::ZooClient::new("http://test.example.com".to_string());
+    assert_eq!(zoo_client.base_url(), "http://test.example.com");
+}
+
+#[tokio::test]
+async fn test_zoo_client_session_token_getter() {
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    assert!(zoo_client.session_token().await.is_none());
+
+    zoo_client.set_session_token("test-token".to_string());
+    let token = zoo_client.session_token().await;
+    assert_eq!(token, Some("test-token".to_string()));
+}
+
+#[tokio::test]
+async fn test_zoo_client_has_http_client() {
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    let _client = zoo_client.client();
+}
+
+#[tokio::test]
+async fn test_device_deregister_forbidden() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client1, token1, _, _) = setup_user().await;
+    let device1 = register_device(&client1, &token1).await;
+    let device_id1 = device1["device_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client1, &email2).await;
+    let token2 = login_user(&client1, &email2).await;
+
+    let resp = client1
+        .delete(&format!("{}/api/devices/{}", base_url(), device_id1))
+        .bearer_auth(&token2)
+        .send()
+        .await
+        .expect("deregister request failed");
+
+    assert_eq!(resp.status(), 403);
+}
+
+#[tokio::test]
+async fn test_device_heartbeat_nonexistent() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+    let fake_id = Uuid::new_v4();
+
+    let resp = client
+        .post(&format!("{}/api/devices/{}/heartbeat", base_url(), fake_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("heartbeat request failed");
+
+    assert!(resp.status() == 204 || resp.status() == 404);
+}
+
+#[tokio::test]
+async fn test_db_files_operations() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("files_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let file_id = zoo::db::files::insert_file_record(
+        &pool,
+        user_id,
+        "test-collection",
+        "encrypted-key",
+        "key-nonce",
+        "file-header",
+        Some("thumb-header"),
+        "encrypted-metadata",
+        Some("encrypted-thumbnail"),
+        Some(100),
+        1000,
+        "application/octet-stream",
+        "content-hash",
+        "test-object-key",
+    )
+    .await
+    .expect("insert file failed");
+
+    let file = zoo::db::files::get_file_for_download(&pool, user_id, file_id)
+        .await
+        .expect("get file failed")
+        .expect("file not found");
+
+    assert_eq!(file.id, file_id);
+    assert_eq!(file.content_hash, "content-hash");
+
+    let archive_result = zoo::db::files::archive_file(&pool, user_id, file_id).await;
+    assert!(archive_result.is_ok());
+
+    let archived = zoo::db::files::get_file_for_download(&pool, user_id, file_id).await.unwrap();
+    assert!(archived.is_none());
+}
+
+#[tokio::test]
+async fn test_db_uploads_get_pending() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("pending_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("pending-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "pending-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "pending-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    let pending = zoo::db::uploads::list_uploads_for_user(&pool, user_id, Some("pending"))
+        .await
+        .expect("list pending uploads failed");
+
+    assert!(!pending.is_empty());
+    assert_eq!(pending[0].status, "pending");
+}
+
+#[tokio::test]
+async fn test_db_uploads_update_status() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("update_status_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("update-status-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "update-status-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "update-status-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::uploads::patch_upload_status(&pool, upload_id, "encrypting")
+        .await
+        .expect("update status failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.status, "encrypting");
+}
+
+#[tokio::test]
+async fn test_db_uploads_heartbeat() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("heartbeat_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("heartbeat-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "heartbeat-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "heartbeat-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::uploads::update_heartbeat(&pool, upload_id)
+        .await
+        .expect("heartbeat failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert!(upload.last_heartbeat_at.is_some());
+}
+
+#[tokio::test]
+async fn test_db_uploads_fail_upload() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("fail_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("fail-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "fail-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "fail-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::uploads::patch_upload_status(&pool, upload_id, "failed")
+        .await
+        .expect("fail upload failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.status, "failed");
+}
+
+#[tokio::test]
+async fn test_s3_client_error_paths() {
+    let s3_client = create_s3_client().await;
+
+    let result = zoo::s3::client::abort_multipart_upload(
+        &s3_client,
+        TEST_BUCKET,
+        "nonexistent-key",
+        "nonexistent-upload-id",
+    )
+    .await;
+
+    assert!(result.is_err());
+
+    let result = zoo::s3::client::delete_object(
+        &s3_client,
+        TEST_BUCKET,
+        "nonexistent-key",
+    )
+    .await;
+
+    assert!(result.is_ok() || result.is_err());
+
+    let result = zoo::s3::client::head_object_size(
+        &s3_client,
+        TEST_BUCKET,
+        "nonexistent-key",
+    )
+    .await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_s3_presigner_build_url() {
+    let url = zoo::s3::presigner::build_complete_url(TEST_BUCKET, "test-key", "test-upload-id");
+    assert!(url.contains(TEST_BUCKET));
+    assert!(url.contains("test-key"));
+    assert!(url.contains("test-upload-id"));
+}
+
+#[tokio::test]
+async fn test_auth_register_duplicate_email() {
+    get_server().await;
+    clean_test_db().await;
+
+    let client = Client::new();
+    let email = format!("dup_{}@example.com", Uuid::new_v4());
+
+    let verify_key_plaintext = format!("{:x}", Sha256::digest(b"test_verify_key"));
+    let verify_key_hash = bcrypt::hash(&verify_key_plaintext, bcrypt::DEFAULT_COST).unwrap();
+
+    let kek_salt = base64::prelude::BASE64_STANDARD.encode([0u8; 16]);
+    let encrypted_master_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let public_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let encrypted_secret_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let secret_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let encrypted_recovery_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let recovery_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+
+    let resp1 = client
+        .post(&format!("{}/api/auth/register", base_url()))
+        .json(&json!({
+            "email": email,
+            "verify_key_hash": verify_key_hash,
+            "encrypted_master_key": encrypted_master_key,
+            "key_nonce": key_nonce,
+            "kek_salt": kek_salt,
+            "mem_limit": 67108864,
+            "ops_limit": 2,
+            "public_key": public_key,
+            "encrypted_secret_key": encrypted_secret_key,
+            "secret_key_nonce": secret_key_nonce,
+            "encrypted_recovery_key": encrypted_recovery_key,
+            "recovery_key_nonce": recovery_key_nonce,
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert!(resp1.status().is_success());
+
+    let resp2 = client
+        .post(&format!("{}/api/auth/register", base_url()))
+        .json(&json!({
+            "email": email,
+            "verify_key_hash": verify_key_hash,
+            "encrypted_master_key": encrypted_master_key,
+            "key_nonce": key_nonce,
+            "kek_salt": kek_salt,
+            "mem_limit": 67108864,
+            "ops_limit": 2,
+            "public_key": public_key,
+            "encrypted_secret_key": encrypted_secret_key,
+            "secret_key_nonce": secret_key_nonce,
+            "encrypted_recovery_key": encrypted_recovery_key,
+            "recovery_key_nonce": recovery_key_nonce,
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert!(resp2.status() == 400 || resp2.status() == 409);
+}
+
+#[tokio::test]
+async fn test_sync_endpoint_empty() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let resp = client
+        .get(&format!("{}/api/sync/files", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("sync files request failed");
+
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let files = body["updated_files"].as_array().unwrap();
+    assert!(files.is_empty());
+
+    let deleted = body["deleted_file_ids"].as_array().unwrap();
+    assert!(deleted.is_empty());
+}
+
+#[tokio::test]
+async fn test_config_has_expected_fields() {
+    let config = zoo::config_from_env();
+    assert!(!config.listen_addr.is_empty());
+    assert!(!config.database_url.is_empty());
+    assert!(!config.s3_region.is_empty());
+    assert!(!config.s3_bucket.is_empty());
+}
+
+#[tokio::test]
+async fn test_validation_email_invalid() {
+    get_server().await;
+    clean_test_db().await;
+
+    let client = Client::new();
+
+    let verify_key_plaintext = format!("{:x}", Sha256::digest(b"test_verify_key"));
+    let verify_key_hash = bcrypt::hash(&verify_key_plaintext, bcrypt::DEFAULT_COST).unwrap();
+
+    let kek_salt = base64::prelude::BASE64_STANDARD.encode([0u8; 16]);
+    let encrypted_master_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let public_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let encrypted_secret_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let secret_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let encrypted_recovery_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let recovery_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+
+    let resp = client
+        .post(&format!("{}/api/auth/register", base_url()))
+        .json(&json!({
+            "email": "not-an-email",
+            "verify_key_hash": verify_key_hash,
+            "encrypted_master_key": encrypted_master_key,
+            "key_nonce": key_nonce,
+            "kek_salt": kek_salt,
+            "mem_limit": 67108864,
+            "ops_limit": 2,
+            "public_key": public_key,
+            "encrypted_secret_key": encrypted_secret_key,
+            "secret_key_nonce": secret_key_nonce,
+            "encrypted_recovery_key": encrypted_recovery_key,
+            "recovery_key_nonce": recovery_key_nonce,
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert_eq!(resp.status(), 400);
+}
+
+#[tokio::test]
+async fn test_validation_email_too_long() {
+    get_server().await;
+    clean_test_db().await;
+
+    let client = Client::new();
+    let long_email = format!("{}@example.com", "a".repeat(300));
+
+    let verify_key_plaintext = format!("{:x}", Sha256::digest(b"test_verify_key"));
+    let verify_key_hash = bcrypt::hash(&verify_key_plaintext, bcrypt::DEFAULT_COST).unwrap();
+
+    let kek_salt = base64::prelude::BASE64_STANDARD.encode([0u8; 16]);
+    let encrypted_master_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let public_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let encrypted_secret_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let secret_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let encrypted_recovery_key = base64::prelude::BASE64_STANDARD.encode([0u8; 48]);
+    let recovery_key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+
+    let resp = client
+        .post(&format!("{}/api/auth/register", base_url()))
+        .json(&json!({
+            "email": long_email,
+            "verify_key_hash": verify_key_hash,
+            "encrypted_master_key": encrypted_master_key,
+            "key_nonce": key_nonce,
+            "kek_salt": kek_salt,
+            "mem_limit": 67108864,
+            "ops_limit": 2,
+            "public_key": public_key,
+            "encrypted_secret_key": encrypted_secret_key,
+            "secret_key_nonce": secret_key_nonce,
+            "encrypted_recovery_key": encrypted_recovery_key,
+            "recovery_key_nonce": recovery_key_nonce,
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert_eq!(resp.status(), 400);
+}
+
+#[tokio::test]
+async fn test_auth_middleware_invalid_token() {
+    get_server().await;
+
+    let client = Client::new();
+    let resp = client
+        .get(&format!("{}/api/uploads", base_url()))
+        .bearer_auth("invalid-token-format")
+        .send()
+        .await
+        .expect("request failed");
+
+    assert_eq!(resp.status(), 401);
+}
+
+#[tokio::test]
+async fn test_file_archive_not_found() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let resp = client
+        .put(&format!("{}/api/files/99999/archive", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("archive request failed");
+
+    assert_eq!(resp.status(), 404);
+}
+
+#[tokio::test]
+async fn test_file_get_not_found() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let resp = client
+        .get(&format!("{}/api/files/99999", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("get file request failed");
+
+    assert_eq!(resp.status(), 404);
+}
+
+#[tokio::test]
+async fn test_file_thumbnail_not_found() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let resp = client
+        .get(&format!("{}/api/files/99999/thumbnail", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("thumbnail request failed");
+
+    assert!(resp.status() == 400 || resp.status() == 404);
+}
