@@ -21,10 +21,12 @@ export default function DashboardLayout({
         }
       >
         <AppSidebar variant="inset" />
-        <SidebarInset className="h-svh overflow-hidden">
-          <SiteHeader />
-          <div className="flex flex-1 flex-col overflow-y-auto">
-            {children}
+        <SidebarInset className="overflow-hidden border md:peer-data-[variant=inset]:border-border">
+          <div className="flex flex-col h-full">
+            <SiteHeader />
+            <div className="flex flex-1 flex-col overflow-y-auto">
+              {children}
+            </div>
           </div>
         </SidebarInset>
       </SidebarProvider>
