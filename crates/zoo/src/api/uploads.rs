@@ -90,9 +90,7 @@ pub async fn create(
     .await
     .map_err(internal_error)?;
 
-    let complete_url = build_complete_url(
-        &state.s3_client,
-        &state.config.s3_bucket,
+    let complete_url = build_complete_url(&state.config.s3_bucket,
         &object_key,
         &presigned_urls.upload_id_s3,
     );
@@ -512,9 +510,7 @@ pub async fn presign(
     .map_err(internal_error)?;
 
     let urls: Vec<String> = presigned_urls.urls.clone();
-    let complete_url = build_complete_url(
-        &state.s3_client,
-        &state.config.s3_bucket,
+    let complete_url = build_complete_url(&state.config.s3_bucket,
         &object_key,
         &presigned_urls.upload_id_s3,
     );
@@ -599,9 +595,7 @@ pub async fn presign_refresh(
     .map_err(internal_error)?;
 
     let urls: Vec<String> = presigned_urls.urls.clone();
-    let complete_url = build_complete_url(
-        &state.s3_client,
-        &state.config.s3_bucket,
+    let complete_url = build_complete_url(&state.config.s3_bucket,
         &object_key,
         &presigned_urls.upload_id_s3,
     );

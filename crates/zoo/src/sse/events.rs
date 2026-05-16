@@ -9,6 +9,7 @@ pub fn format_sse(event: &SseEvent) -> String {
 mod tests {
     use super::*;
     use types::sse::SseEvent;
+    use types::upload::UploadStatus;
 
     #[test]
     fn test_format_sse_heartbeat() {
@@ -18,7 +19,7 @@ mod tests {
         let formatted = format_sse(&event);
         assert!(formatted.starts_with("data: "));
         assert!(formatted.ends_with("\n\n"));
-        assert!(formatted.contains("Heartbeat"));
+        assert!(formatted.contains("heartbeat"));
         assert!(formatted.contains("1700000000000"));
     }
 
@@ -33,7 +34,7 @@ mod tests {
         };
         let formatted = format_sse(&event);
         assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("UploadStalled"));
+        assert!(formatted.contains("upload_stalled"));
         assert!(formatted.contains("upload-1"));
         assert!(formatted.contains("device-1"));
     }
@@ -47,57 +48,78 @@ mod tests {
         };
         let formatted = format_sse(&event);
         assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("UploadFailed"));
+        assert!(formatted.contains("upload_failed"));
         assert!(formatted.contains("upload-2"));
         assert!(formatted.contains("timeout"));
-    }
-
-    #[test]
-    fn test_format_sse_file_uploaded() {
-        let event = SseEvent::FileUploaded {
-            file_id: 42,
-            upload_id: "upload-3".to_string(),
-        };
-        let formatted = format_sse(&event);
-        assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("FileUploaded"));
-        assert!(formatted.contains("42"));
-    }
-
-    #[test]
-    fn test_format_sse_file_registered() {
-        let event = SseEvent::FileRegistered {
-            file_id: 99,
-        };
-        let formatted = format_sse(&event);
-        assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("FileRegistered"));
-        assert!(formatted.contains("99"));
     }
 
     #[test]
     fn test_format_sse_upload_progress() {
         let event = SseEvent::UploadProgress {
             upload_id: "upload-4".to_string(),
-            parts_completed: 5,
-            total_parts: 10,
+            status: UploadStatus::Uploading,
+            parts_bitmask: "AQE=".to_string(),
+            part_count: 10,
+            device_name: "device-4".to_string(),
         };
         let formatted = format_sse(&event);
         assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("UploadProgress"));
-        assert!(formatted.contains("5"));
-        assert!(formatted.contains("10"));
+        assert!(formatted.contains("upload_progress"));
+        assert!(formatted.contains("uploading"));
     }
 
     #[test]
     fn test_format_sse_upload_completed() {
         let event = SseEvent::UploadCompleted {
             upload_id: "upload-5".to_string(),
-            file_id: 100,
+            device_name: "device-5".to_string(),
         };
         let formatted = format_sse(&event);
         assert!(formatted.starts_with("data: "));
-        assert!(formatted.contains("UploadCompleted"));
+        assert!(formatted.contains("upload_completed"));
+        assert!(formatted.contains("upload-5"));
+    }
+
+    #[test]
+    fn test_format_sse_upload_done() {
+        let event = SseEvent::UploadDone {
+            upload_id: "upload-6".to_string(),
+            file_id: 100,
+            device_name: "device-6".to_string(),
+        };
+        let formatted = format_sse(&event);
+        assert!(formatted.starts_with("data: "));
+        assert!(formatted.contains("upload_done"));
         assert!(formatted.contains("100"));
+    }
+
+    #[test]
+    fn test_format_sse_device_connected() {
+        let event = SseEvent::DeviceConnected {
+            device_id: "dev-1".to_string(),
+            device_name: "My Phone".to_string(),
+        };
+        let formatted = format_sse(&event);
+        assert!(formatted.starts_with("data: "));
+        assert!(formatted.contains("device_connected"));
+    }
+
+    #[test]
+    fn test_format_sse_device_disconnected() {
+        let event = SseEvent::DeviceDisconnected {
+            device_id: "dev-2".to_string(),
+            device_name: "My Laptop".to_string(),
+        };
+        let formatted = format_sse(&event);
+        assert!(formatted.starts_with("data: "));
+        assert!(formatted.contains("device_disconnected"));
+    }
+
+    #[test]
+    fn test_format_sse_upload_pending() {
+        let event = SseEvent::UploadPending { uploads: vec![] };
+        let formatted = format_sse(&event);
+        assert!(formatted.starts_with("data: "));
+        assert!(formatted.contains("upload_pending"));
     }
 }

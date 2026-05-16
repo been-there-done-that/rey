@@ -27,7 +27,7 @@ pub async fn presign_part_upload(
     Ok(presigned.uri().to_string())
 }
 
-pub fn build_complete_url(_client: &Client, bucket: &str, key: &str, upload_id: &str) -> String {
+pub fn build_complete_url(bucket: &str, key: &str, upload_id: &str) -> String {
     format!(
         "https://{}.s3.amazonaws.com/{}?uploadId={}",
         bucket, key, upload_id,
@@ -40,9 +40,7 @@ mod tests {
 
     #[test]
     fn test_build_complete_url() {
-        let fake_client = Client::new();
         let url = build_complete_url(
-            &fake_client,
             "my-bucket",
             "uploads/file.bin",
             "abc123",
@@ -55,9 +53,7 @@ mod tests {
 
     #[test]
     fn test_build_complete_url_with_special_chars() {
-        let fake_client = Client::new();
         let url = build_complete_url(
-            &fake_client,
             "test-bucket",
             "path/to/file with spaces.bin",
             "upload-xyz",

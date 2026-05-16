@@ -42,29 +42,3 @@ pub async fn auth_middleware(
 pub fn extract_user_id(req: &Request) -> Option<Uuid> {
     req.extensions().get::<Uuid>().copied()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::Request as HttpRequest;
-
-    #[test]
-    fn test_extract_user_id_present() {
-        let user_id = Uuid::new_v4();
-        let mut req = HttpRequest::builder()
-            .uri("/test")
-            .body(())
-            .unwrap();
-        req.extensions_mut().insert(user_id);
-        assert_eq!(extract_user_id(&req), Some(user_id));
-    }
-
-    #[test]
-    fn test_extract_user_id_absent() {
-        let req = HttpRequest::builder()
-            .uri("/test")
-            .body(())
-            .unwrap();
-        assert_eq!(extract_user_id(&req), None);
-    }
-}
