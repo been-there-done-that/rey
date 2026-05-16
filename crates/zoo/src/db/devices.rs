@@ -50,12 +50,11 @@ pub async fn lookup_device_by_id(
     pool: &PgPool,
     device_id: Uuid,
 ) -> Result<Option<Device>, ZooError> {
-    let device = sqlx::query_as::<_, Device>(
-        "SELECT * FROM devices WHERE id = $1 AND is_active = TRUE",
-    )
-    .bind(device_id)
-    .fetch_optional(pool)
-    .await?;
+    let device =
+        sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = $1 AND is_active = TRUE")
+            .bind(device_id)
+            .fetch_optional(pool)
+            .await?;
     Ok(device)
 }
 

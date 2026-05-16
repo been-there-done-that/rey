@@ -40,7 +40,10 @@ pub fn create_router(
         )
         .route("/api/events", get(events::sse_stream))
         .route("/api/events/test", post(events::send_test_event))
-        .route("/api/files/{file_id}/download", get(files::get_download_url))
+        .route(
+            "/api/files/{file_id}/download",
+            get(files::get_download_url),
+        )
         .route("/api/files/{file_id}/archive", put(files::archive))
         .route("/api/sync/files", get(sync::sync_files))
         .route("/api/uploads", post(uploads::create))

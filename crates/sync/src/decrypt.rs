@@ -14,11 +14,7 @@ pub fn batch_decrypt_files(
         match decrypt_single(record, collection_key) {
             Ok(file_record) => decrypted.push(file_record),
             Err(e) => {
-                tracing::warn!(
-                    "decryption failed for file {}: {}",
-                    record.id,
-                    e
-                );
+                tracing::warn!("decryption failed for file {}: {}", record.id, e);
                 continue;
             }
         }
@@ -62,7 +58,9 @@ fn decrypt_single(
 
     let header_bytes = base64::prelude::BASE64_STANDARD
         .decode(&record.file_decryption_header)
-        .map_err(|e| SyncError::ParseError(format!("base64 decode file_decryption_header: {}", e)))?;
+        .map_err(|e| {
+            SyncError::ParseError(format!("base64 decode file_decryption_header: {}", e))
+        })?;
 
     let mut header_arr = [0u8; 24];
     header_arr.copy_from_slice(&header_bytes);
@@ -77,11 +75,10 @@ fn decrypt_single(
         source: e,
     })?;
 
-    let file_metadata: types::file::FileMetadata =
-        serde_json::from_slice(&metadata_plaintext).map_err(|e| SyncError::ParseError(format!(
-            "invalid metadata for file {}: {}",
-            record.id, e
-        )))?;
+    let file_metadata: types::file::FileMetadata = serde_json::from_slice(&metadata_plaintext)
+        .map_err(|e| {
+            SyncError::ParseError(format!("invalid metadata for file {}: {}", record.id, e))
+        })?;
 
     Ok(FileRecord {
         id: record.id,

@@ -1,12 +1,11 @@
+use base64::Engine;
 use reqwest::Client;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::env;
-use std::process::{Child, Command};
+use std::future::Future;
 use std::time::Duration;
-use uuid::Uuid;
-use base64::Engine;
 use tokio::sync::OnceCell;
+use uuid::Uuid;
 
 const TEST_DB: &str = "zoo_test";
 const TEST_BUCKET: &str = "test-bucket";
@@ -20,105 +19,110 @@ fn test_db_url() -> String {
     format!("postgres://postgres:postgres@localhost/{}", TEST_DB)
 }
 
-fn ensure_test_db() {
-    let output = Command::new("psql")
-        .args([
-            "-h", "localhost",
-            "-U", "postgres",
-            "-c",
-            &format!("SELECT 1 FROM pg_database WHERE datname = '{}'", TEST_DB),
-        ])
-        .env("PGPASSWORD", "postgres")
-        .output()
-        .expect("failed to check database");
+async fn ensure_test_db() {
+    let default_url = "postgres://postgres:postgres@localhost/postgres";
+    let default_pool = sqlx::PgPool::connect(default_url)
+        .await
+        .expect("failed to connect to default postgres database");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.contains("(1 row)") {
-        Command::new("psql")
-            .args([
-                "-h", "localhost",
-                "-U", "postgres",
-                "-c",
-                &format!("CREATE DATABASE {}", TEST_DB),
-            ])
-            .env("PGPASSWORD", "postgres")
-            .output()
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(TEST_DB)
+            .fetch_one(&default_pool)
+            .await
+            .expect("failed to check database existence");
+
+    if !exists {
+        sqlx::query(&format!("CREATE DATABASE {}", TEST_DB))
+            .execute(&default_pool)
+            .await
             .expect("failed to create test database");
     }
 
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
-    let migrations_dir = std::path::Path::new(&manifest_dir)
-        .join("migrations");
+    default_pool.close().await;
 
-    for entry in std::fs::read_dir(&migrations_dir).expect("migrations dir not found") {
-        let entry = entry.expect("failed to read entry");
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("sql") {
-            Command::new("psql")
-                .args([
-                    "-h", "localhost",
-                    "-U", "postgres",
-                    "-d", TEST_DB,
-                    "-f",
-                    path.to_str().unwrap(),
-                ])
-                .env("PGPASSWORD", "postgres")
-                .output()
-                .expect("failed to run migration");
-        }
-    }
+    let test_pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect to test database");
+
+    sqlx::migrate!("./migrations")
+        .run(&test_pool)
+        .await
+        .expect("failed to run migrations");
+
+    test_pool.close().await;
 }
 
-fn clean_test_db() {
+async fn clean_test_db() {
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect to test database for cleanup");
+
     let tables = [
-        "shares", "files", "upload_parts", "uploads", "devices", "sessions", "users",
+        "shares",
+        "files",
+        "upload_parts",
+        "uploads",
+        "devices",
+        "sessions",
+        "users",
     ];
     for table in &tables {
-        Command::new("psql")
-            .args([
-                "-h", "localhost",
-                "-U", "postgres",
-                "-d", TEST_DB,
-                "-c",
-                &format!("TRUNCATE {} CASCADE", table),
-            ])
-            .env("PGPASSWORD", "postgres")
-            .output()
-            .ok();
+        let _ = sqlx::query(&format!("TRUNCATE {} CASCADE", table))
+            .execute(&pool)
+            .await;
     }
+
+    pool.close().await;
 }
 
 struct TestServer {
     port: u16,
-    _child: Child,
+    shutdown_tx: Option<std::sync::mpsc::Sender<()>>,
+    _handle: std::thread::JoinHandle<()>,
 }
 
 impl TestServer {
     fn new(port: u16) -> Self {
-        let child = Command::new("cargo")
-            .args([
-                "run",
-                "-p", "zoo",
-                "--bin", "zoo-server",
-            ])
-            .env("DATABASE_URL", &test_db_url())
-            .env("LISTEN_ADDR", &format!("127.0.0.1:{}", port))
-            .env("S3_ENDPOINT", S3_ENDPOINT)
-            .env("S3_REGION", S3_REGION)
-            .env("S3_BUCKET", TEST_BUCKET)
-            .env("S3_ACCESS_KEY", S3_ACCESS_KEY)
-            .env("S3_SECRET_KEY", S3_SECRET_KEY)
-            .env("DOWNLOAD_MODE", "redirect")
-            .env("SESSION_TTL_DAYS", "30")
-            .env("STALL_TIMEOUT_SECONDS", "90")
-            .env("PRESIGNED_TTL_HOURS", "24")
-            .env("GC_INTERVAL_SECONDS", "300")
-            .env("MAX_FILE_SIZE", "10737418240")
-            .env("DEFAULT_PART_SIZE", "20971520")
-            .spawn()
-            .expect("failed to start zoo server");
+        let addr = format!("127.0.0.1:{}", port);
+        let db_url = test_db_url();
+        let s3_endpoint = S3_ENDPOINT.to_string();
+        let (shutdown_tx, shutdown_rx) = std::sync::mpsc::channel();
 
-        Self { port, _child: child }
+        let handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
+            rt.block_on(async {
+                let mut config = zoo::config::ZooConfig::from_env();
+                config.listen_addr = addr.clone();
+                config.database_url = db_url;
+                config.s3_endpoint = Some(s3_endpoint);
+                config.s3_region = S3_REGION.to_string();
+                config.s3_bucket = TEST_BUCKET.to_string();
+                config.s3_access_key = S3_ACCESS_KEY.to_string();
+                config.s3_secret_key = S3_SECRET_KEY.to_string();
+
+                let db_url = config.database_url.clone();
+                let app = zoo::create_app(&db_url, config)
+                    .await
+                    .expect("failed to create app");
+
+                let listener = tokio::net::TcpListener::bind(&addr)
+                    .await
+                    .expect("failed to bind");
+
+                let server = axum::serve(listener, app);
+                tokio::select! {
+                    _ = server => {},
+                    _ = tokio::task::spawn_blocking(move || { shutdown_rx.recv().ok() }) => {},
+                }
+            });
+        });
+
+        Self {
+            port,
+            shutdown_tx: Some(shutdown_tx),
+            _handle: handle,
+        }
     }
 
     fn base_url(&self) -> String {
@@ -135,24 +139,67 @@ impl TestServer {
         }
         panic!("server did not start within timeout");
     }
+
+    async fn with_server<F, Fut>(port: u16, test_fn: F)
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: Future<Output = ()>,
+    {
+        let addr = format!("127.0.0.1:{}", port);
+        let mut config = zoo::config::ZooConfig::from_env();
+        config.listen_addr = addr.clone();
+        config.database_url = test_db_url();
+        config.s3_endpoint = Some(S3_ENDPOINT.to_string());
+        config.s3_region = S3_REGION.to_string();
+        config.s3_bucket = TEST_BUCKET.to_string();
+        config.s3_access_key = S3_ACCESS_KEY.to_string();
+        config.s3_secret_key = S3_SECRET_KEY.to_string();
+
+        let db_url = config.database_url.clone();
+        let app = zoo::create_app(&db_url, config)
+            .await
+            .expect("failed to create app");
+
+        let listener = tokio::net::TcpListener::bind(&addr)
+            .await
+            .expect("failed to bind");
+
+        let server = axum::serve(listener, app);
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+
+        let server_task = tokio::spawn(async move {
+            let _ = tokio::select! {
+                _ = server => {},
+                _ = shutdown_rx => {},
+            };
+        });
+
+        test_fn(format!("http://{}", addr)).await;
+
+        let _ = shutdown_tx.send(());
+        let _ = server_task.await;
+    }
 }
 
 impl Drop for TestServer {
     fn drop(&mut self) {
-        let _ = self._child.kill();
-        let _ = self._child.wait();
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
     }
 }
 
 static SERVER: OnceCell<TestServer> = OnceCell::const_new();
 
 async fn get_server() -> &'static TestServer {
-    SERVER.get_or_init(|| async {
-        ensure_test_db();
-        let server = TestServer::new(TEST_PORT);
-        server.wait_for_ready(30).await;
-        server
-    }).await
+    SERVER
+        .get_or_init(|| async {
+            ensure_test_db().await;
+            let server = TestServer::new(TEST_PORT);
+            server.wait_for_ready(30).await;
+            server
+        })
+        .await
 }
 
 fn base_url() -> String {
@@ -192,7 +239,11 @@ async fn register_test_user(client: &Client, email: &str) {
         .await
         .expect("register request failed");
 
-    assert!(resp.status() == 201 || resp.status() == 400, "register failed: {:?}", resp.text().await.unwrap());
+    assert!(
+        resp.status() == 201 || resp.status() == 400,
+        "register failed: {:?}",
+        resp.text().await.unwrap()
+    );
 }
 
 async fn login_user(client: &Client, email: &str) -> String {
@@ -231,7 +282,13 @@ async fn register_device(client: &Client, token: &str) -> serde_json::Value {
     resp.json().await.expect("device response not json")
 }
 
-async fn create_upload(client: &Client, token: &str, device_id: &str, file_hash: &str, file_size: i64) -> serde_json::Value {
+async fn create_upload(
+    client: &Client,
+    token: &str,
+    device_id: &str,
+    file_hash: &str,
+    file_size: i64,
+) -> serde_json::Value {
     let resp = client
         .post(&format!("{}/api/uploads", base_url()))
         .bearer_auth(token)
@@ -257,7 +314,7 @@ async fn create_upload(client: &Client, token: &str, device_id: &str, file_hash:
 }
 
 async fn setup_user() -> (Client, String, String, serde_json::Value) {
-    clean_test_db();
+    clean_test_db().await;
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
     register_test_user(&client, &email).await;
@@ -270,7 +327,7 @@ async fn setup_user() -> (Client, String, String, serde_json::Value) {
 #[tokio::test]
 async fn test_auth_register_and_login() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -302,7 +359,7 @@ async fn test_auth_login_wrong_credentials() {
 #[tokio::test]
 async fn test_auth_login_params() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -347,7 +404,7 @@ async fn test_auth_login_params_nonexistent_user() {
 #[tokio::test]
 async fn test_auth_logout() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -383,7 +440,7 @@ async fn test_auth_logout_invalid_token() {
 #[tokio::test]
 async fn test_device_register_and_list() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -399,7 +456,7 @@ async fn test_device_register_and_list() {
 #[tokio::test]
 async fn test_device_deregister() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -422,7 +479,7 @@ async fn test_device_deregister() {
 #[tokio::test]
 async fn test_device_heartbeat() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -433,7 +490,11 @@ async fn test_device_heartbeat() {
     let device_id = device["device_id"].as_str().unwrap();
 
     let resp = client
-        .post(&format!("{}/api/devices/{}/heartbeat", base_url(), device_id))
+        .post(&format!(
+            "{}/api/devices/{}/heartbeat",
+            base_url(),
+            device_id
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -445,7 +506,7 @@ async fn test_device_heartbeat() {
 #[tokio::test]
 async fn test_device_empty_name() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -470,7 +531,7 @@ async fn test_device_empty_name() {
 #[tokio::test]
 async fn test_device_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -491,13 +552,20 @@ async fn test_device_not_found() {
 #[tokio::test]
 async fn test_upload_create() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     assert!(body.get("upload_id").is_some());
     assert_eq!(body["status"], "pending");
 }
@@ -505,13 +573,20 @@ async fn test_upload_create() {
 #[tokio::test]
 async fn test_upload_get_status() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -529,17 +604,28 @@ async fn test_upload_get_status() {
 #[tokio::test]
 async fn test_upload_heartbeat() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/heartbeat", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/heartbeat",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -551,13 +637,20 @@ async fn test_upload_heartbeat() {
 #[tokio::test]
 async fn test_upload_complete() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     // Transition: pending -> encrypting
@@ -568,7 +661,12 @@ async fn test_upload_complete() {
         .send()
         .await
         .expect("patch to encrypting failed");
-    assert_eq!(resp1.status(), 200, "patch to encrypting failed: {:?}", resp1.text().await);
+    assert_eq!(
+        resp1.status(),
+        200,
+        "patch to encrypting failed: {:?}",
+        resp1.text().await
+    );
 
     // Transition: encrypting -> uploading
     let resp2 = client
@@ -578,10 +676,19 @@ async fn test_upload_complete() {
         .send()
         .await
         .expect("patch to uploading failed");
-    assert_eq!(resp2.status(), 200, "patch to uploading failed: {:?}", resp2.text().await);
+    assert_eq!(
+        resp2.status(),
+        200,
+        "patch to uploading failed: {:?}",
+        resp2.text().await
+    );
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/complete",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -595,13 +702,20 @@ async fn test_upload_complete() {
 #[tokio::test]
 async fn test_upload_fail() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -618,7 +732,7 @@ async fn test_upload_fail() {
 #[tokio::test]
 async fn test_upload_dedup() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -664,13 +778,20 @@ async fn test_upload_dedup() {
 #[tokio::test]
 async fn test_upload_cancel() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -696,13 +817,20 @@ async fn test_upload_cancel() {
 #[tokio::test]
 async fn test_upload_patch_status() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -729,13 +857,20 @@ async fn test_upload_patch_status() {
 #[tokio::test]
 async fn test_upload_patch_invalid_transition() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -752,13 +887,20 @@ async fn test_upload_patch_invalid_transition() {
 #[tokio::test]
 async fn test_upload_presign() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -780,24 +922,38 @@ async fn test_upload_presign() {
 #[tokio::test]
 async fn test_upload_presign_refresh() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/presign-refresh", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/presign-refresh",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token)
         .send()
         .await
         .expect("presign-refresh failed");
 
     assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = resp.json().await.expect("presign-refresh response not json");
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .expect("presign-refresh response not json");
     assert!(body.get("urls").is_some());
     assert!(body.get("complete_url").is_some());
 }
@@ -805,13 +961,20 @@ async fn test_upload_presign_refresh() {
 #[tokio::test]
 async fn test_upload_register_file() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     // Transition through states: pending -> encrypting -> uploading -> s3_completed
@@ -840,7 +1003,11 @@ async fn test_upload_register_file() {
         .expect("patch to s3_completed failed");
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/register",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token)
         .json(&json!({
             "collection_id": "test-collection",
@@ -861,7 +1028,7 @@ async fn test_upload_register_file() {
 #[tokio::test]
 async fn test_upload_list_pending() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -901,13 +1068,20 @@ async fn test_upload_list_pending() {
 #[tokio::test]
 async fn test_upload_confirm_part() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token, &device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let resp = client
@@ -924,7 +1098,7 @@ async fn test_upload_confirm_part() {
 #[tokio::test]
 async fn test_upload_missing_device_header() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -951,7 +1125,7 @@ async fn test_upload_missing_device_header() {
 #[tokio::test]
 async fn test_upload_invalid_device_id_format() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
     let file_data = vec![0u8; 1024];
@@ -979,7 +1153,7 @@ async fn test_upload_invalid_device_id_format() {
 #[tokio::test]
 async fn test_upload_file_too_large() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1006,7 +1180,7 @@ async fn test_upload_file_too_large() {
 #[tokio::test]
 async fn test_upload_part_count_exceeded() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1033,7 +1207,7 @@ async fn test_upload_part_count_exceeded() {
 #[tokio::test]
 async fn test_upload_part_size_too_small() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1060,7 +1234,7 @@ async fn test_upload_part_size_too_small() {
 #[tokio::test]
 async fn test_upload_part_md5s_count_mismatch() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1087,7 +1261,7 @@ async fn test_upload_part_md5s_count_mismatch() {
 #[tokio::test]
 async fn test_upload_part_md5_invalid_length() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, device_id, _) = setup_user().await;
     let file_hash = format!("{:x}", Sha256::digest(b"test"));
@@ -1114,7 +1288,7 @@ async fn test_upload_part_md5_invalid_length() {
 #[tokio::test]
 async fn test_upload_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 
@@ -1131,7 +1305,7 @@ async fn test_upload_not_found() {
 #[tokio::test]
 async fn test_upload_forbidden_access() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1143,7 +1317,14 @@ async fn test_upload_forbidden_access() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1163,7 +1344,7 @@ async fn test_upload_forbidden_access() {
 #[tokio::test]
 async fn test_upload_cancel_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1175,7 +1356,14 @@ async fn test_upload_cancel_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1195,7 +1383,7 @@ async fn test_upload_cancel_forbidden() {
 #[tokio::test]
 async fn test_upload_patch_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1207,7 +1395,14 @@ async fn test_upload_patch_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1228,7 +1423,7 @@ async fn test_upload_patch_forbidden() {
 #[tokio::test]
 async fn test_upload_presign_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1240,7 +1435,14 @@ async fn test_upload_presign_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1263,7 +1465,7 @@ async fn test_upload_presign_forbidden() {
 #[tokio::test]
 async fn test_upload_presign_refresh_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1275,7 +1477,14 @@ async fn test_upload_presign_refresh_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1283,7 +1492,11 @@ async fn test_upload_presign_refresh_forbidden() {
     let token2 = login_user(&client, &email2).await;
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/presign-refresh", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/presign-refresh",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token2)
         .send()
         .await
@@ -1295,7 +1508,7 @@ async fn test_upload_presign_refresh_forbidden() {
 #[tokio::test]
 async fn test_upload_register_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1307,7 +1520,14 @@ async fn test_upload_register_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1315,7 +1535,11 @@ async fn test_upload_register_forbidden() {
     let token2 = login_user(&client, &email2).await;
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/register",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token2)
         .json(&json!({
             "collection_id": "test-collection",
@@ -1334,7 +1558,7 @@ async fn test_upload_register_forbidden() {
 #[tokio::test]
 async fn test_upload_complete_forbidden() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1346,7 +1570,14 @@ async fn test_upload_complete_forbidden() {
     let file_data = vec![0u8; 1024];
     let file_hash = format!("{:x}", Sha256::digest(&file_data));
 
-    let body = create_upload(&client, &token1, device_id, &file_hash, file_data.len() as i64).await;
+    let body = create_upload(
+        &client,
+        &token1,
+        device_id,
+        &file_hash,
+        file_data.len() as i64,
+    )
+    .await;
     let upload_id = body["upload_id"].as_str().unwrap();
 
     let email2 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1354,7 +1585,11 @@ async fn test_upload_complete_forbidden() {
     let token2 = login_user(&client, &email2).await;
 
     let resp = client
-        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .post(&format!(
+            "{}/api/uploads/{}/complete",
+            base_url(),
+            upload_id
+        ))
         .bearer_auth(&token2)
         .send()
         .await
@@ -1366,7 +1601,7 @@ async fn test_upload_complete_forbidden() {
 #[tokio::test]
 async fn test_device_forbidden_access() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email1 = format!("test_{}@example.com", Uuid::new_v4());
@@ -1392,7 +1627,7 @@ async fn test_device_forbidden_access() {
 #[tokio::test]
 async fn test_sync_files() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1418,7 +1653,7 @@ async fn test_sync_files() {
 #[tokio::test]
 async fn test_sync_files_with_since() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1427,7 +1662,10 @@ async fn test_sync_files_with_since() {
     let token = login_user(&client, &email).await;
 
     let resp = client
-        .get(&format!("{}/api/sync/files?since=1700000000000&limit=50", base_url()))
+        .get(&format!(
+            "{}/api/sync/files?since=1700000000000&limit=50",
+            base_url()
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -1442,7 +1680,7 @@ async fn test_sync_files_with_since() {
 #[tokio::test]
 async fn test_sse_events() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1460,7 +1698,8 @@ async fn test_sse_events() {
         .expect("sse request failed");
 
     assert_eq!(resp.status(), 200);
-    let content_type = resp.headers()
+    let content_type = resp
+        .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
@@ -1470,7 +1709,7 @@ async fn test_sse_events() {
 #[tokio::test]
 async fn test_sse_test_event() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
     let email = format!("test_{}@example.com", Uuid::new_v4());
@@ -1506,7 +1745,7 @@ async fn test_unauthorized_access() {
 #[tokio::test]
 async fn test_validation_email_empty() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let client = Client::new();
 
@@ -1536,7 +1775,7 @@ async fn test_validation_email_empty() {
 #[tokio::test]
 async fn test_file_download_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 
@@ -1553,7 +1792,7 @@ async fn test_file_download_not_found() {
 #[tokio::test]
 async fn test_file_archive_not_found() {
     get_server().await;
-    clean_test_db();
+    clean_test_db().await;
 
     let (client, token, _, _) = setup_user().await;
 

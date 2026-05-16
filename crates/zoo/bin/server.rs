@@ -40,11 +40,7 @@ async fn main() -> anyhow::Result<()> {
         config.gc_interval,
     );
 
-    let stall_detector = StallDetector::new(
-        pool.clone(),
-        sse_hub.clone(),
-        config.stall_timeout,
-    );
+    let stall_detector = StallDetector::new(pool.clone(), sse_hub.clone(), config.stall_timeout);
 
     tokio::spawn(async move {
         gc.run().await;

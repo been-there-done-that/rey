@@ -14,6 +14,10 @@ pub async fn download_file(
         .await
         .map_err(ZooError::HttpError)?;
 
+    if !resp.status().is_success() && !resp.status().is_redirection() {
+        return Err(ZooError::HttpError(resp.error_for_status().unwrap_err()));
+    }
+
     if resp.status().is_redirection() {
         let location = resp
             .headers()
@@ -48,6 +52,10 @@ pub async fn get_thumbnail(
         .send()
         .await
         .map_err(ZooError::HttpError)?;
+
+    if !resp.status().is_success() {
+        return Err(ZooError::HttpError(resp.error_for_status().unwrap_err()));
+    }
 
     let bytes = resp.bytes().await.map_err(ZooError::HttpError)?;
     Ok(bytes.to_vec())

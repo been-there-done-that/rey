@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: rey-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: zoo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  floci:
+    image: floci/floci:latest
+    container_name: rey-floci
+    ports:
+      - "4566:4566"
+    environment:
+      - FLOCI_DEFAULT_REGION=us-east-1
+      - FLOCI_STORAGE_MODE=hybrid
+    volumes:
+      - floci_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  create-bucket:
+    image: amazon/aws-cli:latest
+    container_name: rey-floci-init
+    depends_on:
+      floci:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: >
+      /bin/sh -c "
+      aws --endpoint-url http://floci:4566 s3 mb s3://rey-files 2>/dev/null || echo 'bucket already exists'
+      "
+
+volumes:
+  postgres_data:
+  floci_data:

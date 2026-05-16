@@ -1,4 +1,6 @@
-use crate::db::devices::{lookup_device_by_id, lookup_by_sse_token, register_device, tombstone_device, update_last_seen};
+use crate::db::devices::{
+    lookup_by_sse_token, lookup_device_by_id, register_device, tombstone_device, update_last_seen,
+};
 use crate::error::ZooError;
 use crate::state::AppState;
 use crate::validation::validate_device_name;

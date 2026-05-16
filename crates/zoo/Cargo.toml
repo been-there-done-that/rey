@@ -47,3 +47,6 @@ hyper = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 reqwest = { workspace = true, features = ["blocking"] }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["full"] }
+tower = { workspace = true }

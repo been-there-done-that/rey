@@ -21,9 +21,7 @@ impl SseClient {
         }
     }
 
-    pub fn stream(
-        self,
-    ) -> Pin<Box<dyn Stream<Item = Result<SseEvent, ZooError>> + Send>> {
+    pub fn stream(self) -> Pin<Box<dyn Stream<Item = Result<SseEvent, ZooError>> + Send>> {
         let base_url = self.base_url;
         let session_token = self.session_token;
 
@@ -97,5 +95,7 @@ fn parse_sse_event(data: &str) -> Result<SseEvent, ZooError> {
                 .map_err(|e| ZooError::ParseError(format!("invalid SSE event: {}", e)));
         }
     }
-    Err(ZooError::ParseError("no data field in SSE event".to_string()))
+    Err(ZooError::ParseError(
+        "no data field in SSE event".to_string(),
+    ))
 }

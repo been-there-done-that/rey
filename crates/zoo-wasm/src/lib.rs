@@ -53,7 +53,10 @@ impl ZooHandle {
         encrypted_bytes: &[u8],
     ) -> Result<JsValue, JsError> {
         let upload_id = uuid::Uuid::parse_str(upload_id)?;
-        let file_id = self.client.resume_upload(upload_id, encrypted_bytes).await?;
+        let file_id = self
+            .client
+            .resume_upload(upload_id, encrypted_bytes)
+            .await?;
         Ok(serde_wasm_bindgen::to_value(&file_id)?)
     }
 
