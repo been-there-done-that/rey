@@ -2516,3 +2516,271 @@ async fn create_s3_client() -> aws_sdk_s3::Client {
 
     aws_sdk_s3::Client::from_conf(config_builder.build())
 }
+
+#[tokio::test]
+async fn test_worker_stall_detector_tick() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("stall_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("stall-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "stall-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "stall-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    sqlx::query("UPDATE uploads SET status = 'uploading', last_heartbeat_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
+        .bind(upload_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let hub = std::sync::Arc::new(zoo::sse::hub::SseHub::new());
+    let detector = zoo::workers::stall_detector::StallDetector::new(
+        pool.clone(),
+        hub.clone(),
+        std::time::Duration::from_secs(3600),
+    );
+
+    detector.tick().await.expect("stall detector tick failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.status, "stalled");
+    assert!(upload.stalled_at.is_some());
+}
+
+#[tokio::test]
+async fn test_worker_garbage_collector_tick() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("gc_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("gc-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "gc-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() - chrono::Duration::hours(2),
+        "gc-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    sqlx::query("UPDATE uploads SET expires_at = NOW() - INTERVAL '1 hour', upload_id_s3 = 'test-upload-id', object_key = 'test-object-key' WHERE id = $1")
+        .bind(upload_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let s3_client = create_s3_client().await;
+    let hub = std::sync::Arc::new(zoo::sse::hub::SseHub::new());
+    let gc = zoo::workers::garbage_collector::GarbageCollector::new(
+        pool.clone(),
+        s3_client,
+        hub.clone(),
+        TEST_BUCKET.to_string(),
+        std::time::Duration::from_secs(60),
+    );
+
+    let result = gc.tick().await;
+    assert!(result.is_ok());
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.status, "failed");
+}
+
+#[tokio::test]
+async fn test_worker_stall_detector_no_stalled() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let hub = std::sync::Arc::new(zoo::sse::hub::SseHub::new());
+    let detector = zoo::workers::stall_detector::StallDetector::new(
+        pool.clone(),
+        hub.clone(),
+        std::time::Duration::from_secs(3600),
+    );
+
+    let result = detector.tick().await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_worker_garbage_collector_no_expired() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let s3_client = create_s3_client().await;
+    let hub = std::sync::Arc::new(zoo::sse::hub::SseHub::new());
+    let gc = zoo::workers::garbage_collector::GarbageCollector::new(
+        pool.clone(),
+        s3_client,
+        hub.clone(),
+        TEST_BUCKET.to_string(),
+        std::time::Duration::from_secs(60),
+    );
+
+    let result = gc.tick().await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_zoo_client_pending_uploads() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Zoo client test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token(token.clone());
+
+    let pending = zoo_client.pending_uploads().await.expect("pending uploads failed");
+    assert!(!pending.is_empty());
+}
+
+#[tokio::test]
+async fn test_zoo_client_cancel_upload() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Cancel upload test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token(token.clone());
+
+    let upload_uuid = Uuid::parse_str(upload_id).expect("invalid upload id");
+    let result = zoo_client.cancel_upload(upload_uuid).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_zoo_client_download_file_not_found() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token("test-token".to_string());
+
+    let result = zoo_client.download_file(99999).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_zoo_client_get_thumbnail_not_found() {
+    get_server().await;
+
+    let zoo_client = zoo_client::ZooClient::new(base_url());
+    zoo_client.set_session_token("test-token".to_string());
+
+    let result = zoo_client.get_thumbnail(99999).await;
+    assert!(result.is_err());
+}

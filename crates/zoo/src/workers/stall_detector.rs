@@ -34,7 +34,7 @@ impl StallDetector {
         }
     }
 
-    async fn tick(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn tick(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let threshold = Utc::now() - chrono::Duration::from_std(self.stall_timeout)?;
         let stalled = list_stalled_uploads(&self.pool, threshold).await?;
 

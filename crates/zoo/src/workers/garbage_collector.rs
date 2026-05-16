@@ -45,7 +45,7 @@ impl GarbageCollector {
         }
     }
 
-    async fn tick(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn tick(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let expired = list_expired_uploads(&self.pool, Utc::now()).await?;
 
         for upload in expired {

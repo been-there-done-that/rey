@@ -8537,6 +8537,7 @@ dependencies = [
  "types",
  "utoipa",
  "uuid",
+ "zoo-client",
 ]
 
 [[package]]

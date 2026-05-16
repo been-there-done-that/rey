@@ -50,3 +50,5 @@ reqwest = { workspace = true, features = ["blocking"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 tower = { workspace = true }
+zoo-client = { workspace = true }
+aws-config = { workspace = true }
