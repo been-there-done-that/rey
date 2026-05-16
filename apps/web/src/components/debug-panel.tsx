@@ -2,18 +2,27 @@
 
 import { useState } from "react"
 import { useWasmStore } from "@/lib/wasm-store"
+import { useFFmpegStore } from "@/lib/ffmpeg-store"
 
 export function DebugPanel() {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  const status = useWasmStore((s) => s.status)
-  const error = useWasmStore((s) => s.error)
-  const initTime = useWasmStore((s) => s.initTime)
+
+  const wasmStatus = useWasmStore((s) => s.status)
+  const wasmError = useWasmStore((s) => s.error)
+  const wasmInitTime = useWasmStore((s) => s.initTime)
+
+  const ffmpegStatus = useFFmpegStore((s) => s.status)
+  const ffmpegError = useFFmpegStore((s) => s.error)
+  const ffmpegLoadTime = useFFmpegStore((s) => s.loadTime)
 
   const items = [
-    { label: "WASM status", value: status },
-    { label: "Init time", value: initTime ? `${Date.now() - initTime}ms ago` : "not initialized" },
-    { label: "Error", value: error ?? "none" },
+    { label: "Crypto WASM", value: wasmStatus },
+    { label: "Crypto init", value: wasmInitTime ? `${Date.now() - wasmInitTime}ms ago` : "not initialized" },
+    { label: "Crypto error", value: wasmError ?? "none" },
+    { label: "FFmpeg", value: ffmpegStatus },
+    { label: "FFmpeg load", value: ffmpegLoadTime ? `${ffmpegLoadTime}ms` : "not loaded" },
+    { label: "FFmpeg error", value: ffmpegError ?? "none" },
   ]
 
   function copyReport() {
@@ -22,6 +31,16 @@ export function DebugPanel() {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  const wasmDot = wasmStatus === "ready" ? "text-green-500"
+    : wasmStatus === "error" ? "text-destructive"
+    : wasmStatus === "loading" ? "text-yellow-500"
+    : "text-muted-foreground"
+
+  const ffmpegDot = ffmpegStatus === "ready" ? "text-green-500"
+    : ffmpegStatus === "error" ? "text-destructive"
+    : ffmpegStatus === "loading" ? "text-yellow-500"
+    : "text-muted-foreground"
 
   if (!open) {
     return (
@@ -39,10 +58,8 @@ export function DebugPanel() {
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="font-semibold">
           Debug{" "}
-          {status === "ready" && <span className="text-green-500">●</span>}
-          {status === "error" && <span className="text-destructive">●</span>}
-          {status === "loading" && <span className="text-yellow-500">◌</span>}
-          {status === "idle" && <span className="text-muted-foreground">○</span>}
+          <span className={wasmDot}>●</span>
+          <span className={ffmpegDot}>●</span>
         </span>
         <div className="flex gap-1">
           <button
@@ -60,7 +77,7 @@ export function DebugPanel() {
         {items.map((item) => (
           <div key={item.label} className="flex gap-2 py-1">
             <span className="w-24 shrink-0 text-muted-foreground">{item.label}</span>
-            <span className={item.label === "Error" && item.value !== "none" ? "text-destructive" : "text-foreground"}>
+            <span className={item.label.includes("error") && item.value !== "none" ? "text-destructive" : "text-foreground"}>
               {item.value}
             </span>
           </div>
