@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/lib/auth-store"
-import { api } from "@/lib/api"
+import { authApi } from "@/lib/api"
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -24,7 +24,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     let cancelled = false
     const controller = new AbortController()
 
-    api.get("api/auth/me", { signal: controller.signal })
+    authApi(token).get("api/auth/me", { signal: controller.signal })
       .json()
       .then(() => {
         if (!cancelled) {
