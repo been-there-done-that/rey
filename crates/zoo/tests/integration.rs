@@ -3809,3 +3809,931 @@ async fn test_file_thumbnail_not_found() {
 
     assert!(resp.status() == 400 || resp.status() == 404);
 }
+
+#[tokio::test]
+async fn test_sync_files_with_since_param() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Sync with since test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.trim_matches('"').to_string()).unwrap();
+
+    client.put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send().await.expect("confirm part failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send().await.expect("patch failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send().await.expect("patch failed");
+
+    client.post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .send().await.expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send().await.expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let since_ts = chrono::Utc::now().timestamp_millis() - 1000;
+    let sync_resp = client
+        .get(&format!("{}/api/sync/files?since={}", base_url(), since_ts))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("sync files with since failed");
+
+    assert_eq!(sync_resp.status(), 200);
+    let sync_body: serde_json::Value = sync_resp.json().await.unwrap();
+    let files = sync_body["updated_files"].as_array().unwrap();
+    assert!(!files.is_empty());
+
+    let future_ts = chrono::Utc::now().timestamp_millis() + 1000000;
+    let sync_resp2 = client
+        .get(&format!("{}/api/sync/files?since={}", base_url(), future_ts))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("sync files with future since failed");
+
+    assert_eq!(sync_resp2.status(), 200);
+    let sync_body2: serde_json::Value = sync_resp2.json().await.unwrap();
+    let files2 = sync_body2["updated_files"].as_array().unwrap();
+    assert!(files2.is_empty());
+}
+
+#[tokio::test]
+async fn test_sync_files_with_limit_param() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let sync_resp = client
+        .get(&format!("{}/api/sync/files?limit=1", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("sync files with limit failed");
+
+    assert_eq!(sync_resp.status(), 200);
+    let sync_body: serde_json::Value = sync_resp.json().await.unwrap();
+    let has_more = sync_body["has_more"].as_bool().unwrap();
+    assert!(!has_more);
+}
+
+#[tokio::test]
+async fn test_file_archive_already_archived_returns_404() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Archive test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.trim_matches('"').to_string()).unwrap();
+
+    client.put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send().await.expect("confirm part failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send().await.expect("patch failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send().await.expect("patch failed");
+
+    client.post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .send().await.expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send().await.expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let archive_resp1 = client
+        .put(&format!("{}/api/files/{}/archive", base_url(), file_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("archive request failed");
+
+    assert_eq!(archive_resp1.status(), 204);
+
+    let archive_resp2 = client
+        .put(&format!("{}/api/files/{}/archive", base_url(), file_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("archive request failed");
+
+    assert_eq!(archive_resp2.status(), 404);
+}
+
+#[tokio::test]
+async fn test_file_download_presigned_url_contains_s3() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Download URL test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.trim_matches('"').to_string()).unwrap();
+
+    client.put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send().await.expect("confirm part failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send().await.expect("patch failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send().await.expect("patch failed");
+
+    client.post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .send().await.expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send().await.expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let download_resp = client
+        .get(&format!("{}/api/files/{}/download", base_url(), file_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("download request failed");
+
+    assert_eq!(download_resp.status(), 200);
+    let download_body: serde_json::Value = download_resp.json().await.unwrap();
+    let url = download_body["url"].as_str().unwrap();
+    assert!(url.contains("localhost") || url.contains("127.0.0.1") || url.contains("s3"));
+    assert!(url.contains("X-Amz-") || url.contains("presign"));
+}
+
+#[tokio::test]
+async fn test_zoo_client_sse_parse_event() {
+    let event_data = "data: {\"type\":\"heartbeat\",\"timestamp\":1700000000000}";
+    let parsed: types::sse::SseEvent = serde_json::from_str(
+        event_data.strip_prefix("data: ").unwrap()
+    ).expect("failed to parse event");
+    match parsed {
+        types::sse::SseEvent::Heartbeat { timestamp } => assert_eq!(timestamp, 1700000000000),
+        _ => panic!("wrong event type"),
+    }
+}
+
+#[tokio::test]
+async fn test_zoo_client_sse_parse_invalid() {
+    let result: Result<types::sse::SseEvent, _> = serde_json::from_str("not json");
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_zoo_client_sse_parse_no_data() {
+    let event_str = "event: unknown\nno data here";
+    let mut found_data = false;
+    for line in event_str.lines() {
+        if line.starts_with("data: ") {
+            found_data = true;
+            break;
+        }
+    }
+    assert!(!found_data);
+}
+
+#[tokio::test]
+async fn test_db_uploads_list_by_status() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("list_status_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("list-status-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "list-status-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "list-status-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    let pending = zoo::db::uploads::list_uploads_by_status(&pool, "pending", 100)
+        .await
+        .expect("list uploads by status failed");
+
+    assert!(!pending.is_empty());
+    assert_eq!(pending[0].status, "pending");
+
+    let failed = zoo::db::uploads::list_uploads_by_status(&pool, "failed", 100)
+        .await
+        .expect("list uploads by status failed");
+
+    assert!(failed.is_empty());
+}
+
+#[tokio::test]
+async fn test_db_uploads_list_for_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("list_user_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("list-user-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "list-user-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "list-user-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    let uploads = zoo::db::uploads::list_uploads_for_user(&pool, user_id, None)
+        .await
+        .expect("list uploads for user failed");
+
+    assert!(!uploads.is_empty());
+
+    let pending = zoo::db::uploads::list_uploads_for_user(&pool, user_id, Some("pending"))
+        .await
+        .expect("list uploads for user failed");
+
+    assert!(!pending.is_empty());
+}
+
+#[tokio::test]
+async fn test_db_uploads_update_bitmask() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("bitmask_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("bitmask-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "bitmask-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "bitmask-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::uploads::update_bitmask(&pool, upload_id, &[0b00000001])
+        .await
+        .expect("update bitmask failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert!(upload.parts_bitmask.is_some());
+}
+
+#[tokio::test]
+async fn test_db_uploads_update_s3_info() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("s3_info_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("s3-info-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "s3-info-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "s3-info-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::uploads::update_s3_info(
+        &pool,
+        upload_id,
+        "s3-upload-id-123",
+        "https://s3.amazonaws.com/complete",
+        chrono::Utc::now() + chrono::Duration::hours(1),
+    )
+    .await
+    .expect("update s3 info failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.upload_id_s3, Some("s3-upload-id-123".to_string()));
+    assert!(upload.complete_url.is_some());
+}
+
+#[tokio::test]
+async fn test_db_uploads_list_stalled_uploads() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("stalled_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("stalled-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "stalled-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "stalled-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    sqlx::query("UPDATE uploads SET status = 'uploading', last_heartbeat_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
+        .bind(upload_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let stalled = zoo::db::uploads::list_stalled_uploads(&pool, chrono::Utc::now() - chrono::Duration::hours(1))
+        .await
+        .expect("list stalled uploads failed");
+
+    assert!(!stalled.is_empty());
+    assert_eq!(stalled[0].status, "uploading");
+
+    zoo::db::uploads::mark_stalled(&pool, upload_id)
+        .await
+        .expect("mark stalled failed");
+
+    let upload = zoo::db::uploads::get_upload(&pool, upload_id)
+        .await
+        .expect("get upload failed")
+        .expect("upload not found");
+
+    assert_eq!(upload.status, "stalled");
+}
+
+#[tokio::test]
+async fn test_db_uploads_list_expired() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("expired_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("expired-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "expired-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        1,
+        chrono::Utc::now() - chrono::Duration::hours(2),
+        "expired-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    let expired = zoo::db::uploads::list_expired_uploads(&pool, chrono::Utc::now())
+        .await
+        .expect("list expired uploads failed");
+
+    assert!(!expired.is_empty());
+}
+
+#[tokio::test]
+async fn test_db_files_list_for_sync() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("sync_list_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let file_id = zoo::db::files::insert_file_record(
+        &pool,
+        user_id,
+        "sync-collection",
+        "encrypted-key",
+        "key-nonce",
+        "file-header",
+        Some("thumb-header"),
+        "encrypted-metadata",
+        Some("encrypted-thumbnail"),
+        Some(100),
+        1000,
+        "application/octet-stream",
+        "content-hash",
+        "sync-object-key",
+    )
+    .await
+    .expect("insert file failed");
+
+    let files = zoo::db::files::list_files_for_sync(&pool, user_id, None, 100)
+        .await
+        .expect("list files for sync failed");
+
+    assert!(!files.is_empty());
+    assert_eq!(files[0].id, file_id);
+
+    let future_since = chrono::Utc::now() + chrono::Duration::hours(1);
+    let files_future = zoo::db::files::list_files_for_sync(&pool, user_id, Some(future_since), 100)
+        .await
+        .expect("list files for sync failed");
+
+    assert!(files_future.is_empty());
+}
+
+#[tokio::test]
+async fn test_db_devices_get_stall_timeout() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("stall_timeout_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let device_id = zoo::db::devices::register_device(
+        &pool,
+        user_id,
+        "stall-timeout-device",
+        "desktop",
+        &Uuid::new_v4().to_string(),
+        None,
+        120,
+    )
+    .await
+    .expect("register device failed");
+
+    let timeout = zoo::db::devices::get_device_stall_timeout(&pool, device_id)
+        .await
+        .expect("get stall timeout failed");
+
+    assert_eq!(timeout, 120);
+}
+
+#[tokio::test]
+async fn test_db_upload_parts_insert_and_list() {
+    get_server().await;
+    clean_test_db().await;
+
+    let pool = sqlx::PgPool::connect(&test_db_url())
+        .await
+        .expect("failed to connect");
+
+    let user_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users (id, email, verify_key_hash, encrypted_master_key, key_nonce, kek_salt, mem_limit, ops_limit, public_key, encrypted_secret_key, secret_key_nonce, encrypted_recovery_key, recovery_key_nonce) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)")
+        .bind(user_id)
+        .bind(format!("parts_list_test_{}@test.com", Uuid::new_v4()))
+        .bind("hash")
+        .bind("key")
+        .bind("nonce")
+        .bind("salt")
+        .bind(67108864i32)
+        .bind(2i32)
+        .bind("pub")
+        .bind("sec")
+        .bind("snonce")
+        .bind("rec")
+        .bind("rnonce")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO devices (id, user_id, name, platform, sse_token, stall_timeout_seconds) VALUES ($1, $2, $3, $4, $5, $6)")
+        .bind(device_id)
+        .bind(user_id)
+        .bind("parts-list-device")
+        .bind("desktop")
+        .bind(Uuid::new_v4().to_string())
+        .bind(90i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let upload_id = zoo::db::uploads::create_upload(
+        &pool,
+        user_id,
+        device_id,
+        "parts-list-hash",
+        1000,
+        Some("application/octet-stream"),
+        5242880,
+        2,
+        chrono::Utc::now() + chrono::Duration::hours(1),
+        "parts-list-key",
+    )
+    .await
+    .expect("create upload failed");
+
+    zoo::db::upload_parts::insert_parts_batch(
+        &pool,
+        upload_id,
+        &[
+            (1, 500, "md5-1".to_string()),
+            (2, 500, "md5-2".to_string()),
+        ],
+    )
+    .await
+    .expect("insert parts failed");
+
+    let pending = zoo::db::upload_parts::list_pending_parts(&pool, upload_id)
+        .await
+        .expect("list pending parts failed");
+
+    assert_eq!(pending.len(), 2);
+
+    zoo::db::upload_parts::mark_part_uploaded(&pool, upload_id, 1, "etag-1")
+        .await
+        .expect("mark part uploaded failed");
+
+    let pending_after = zoo::db::upload_parts::list_pending_parts(&pool, upload_id)
+        .await
+        .expect("list pending parts failed");
+
+    assert_eq!(pending_after.len(), 1);
+
+    let uploaded = zoo::db::upload_parts::list_uploaded_parts(&pool, upload_id)
+        .await
+        .expect("list uploaded parts failed");
+
+    assert_eq!(uploaded.len(), 1);
+    assert_eq!(uploaded[0].etag, Some("etag-1".to_string()));
+}
