@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -43,6 +43,13 @@ export function LoginForm({
   const [error, setError] = useState("")
   const [email, setEmail] = useState("")
   const [loginParams, setLoginParams] = useState<{ kek_salt: string; mem_limit: number; ops_limit: number } | null>(null)
+  const [redirect, setRedirect] = useState("/d/home")
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const r = params.get("redirect")
+    if (r) setRedirect(r)
+  }, [])
 
   const emailForm = useForm<EmailInput>({
     resolver: zodResolver(emailSchema),
@@ -88,7 +95,7 @@ export function LoginForm({
       }).json<{ session_token: string }>()
 
       setToken(loginRes.session_token)
-      router.push("/d/home")
+      router.push(redirect)
     } catch {
       setError("Invalid password")
     } finally {

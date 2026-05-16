@@ -32,6 +32,7 @@ pub fn create_router(
         .route("/api/auth/register", post(auth::register));
 
     let protected_routes = Router::new()
+        .route("/api/auth/me", get(auth::me))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/devices", post(devices::register))
         .route("/api/devices/{device_id}", delete(devices::deregister))

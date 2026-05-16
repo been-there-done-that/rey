@@ -205,6 +205,57 @@ pub async fn logout(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn me(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let auth_header = headers.get(axum::http::header::AUTHORIZATION).ok_or((
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: ApiError {
+                code: ErrorCode::Unauthorized,
+                message: "missing authorization header".to_string(),
+                details: None,
+            },
+        }),
+    ))?;
+
+    let auth_str = auth_header.to_str().map_err(|_| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::Unauthorized,
+                    message: "invalid token".to_string(),
+                    details: None,
+                },
+            }),
+        )
+    })?;
+
+    let token = &auth_str[7..];
+    let token_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+
+    let session = crate::db::sessions::lookup_session(&state.pool, &token_hash)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: ApiError {
+                    code: ErrorCode::Unauthorized,
+                    message: "session expired".to_string(),
+                    details: None,
+                },
+            }),
+        ))?;
+
+    Ok(Json(serde_json::json!({
+        "user_id": session.user_id.to_string(),
+        "expires_at": session.expires_at,
+    })))
+}
+
 fn dummy_bcrypt() {
     let _ = hash("dummy", DEFAULT_COST);
 }
