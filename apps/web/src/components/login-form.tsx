@@ -24,7 +24,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { useAuth } from "@/lib/auth-store"
-import { deriveKek, deriveVerificationKey, bcryptHash } from "@/lib/auth-crypto"
+import { deriveKek, deriveVerificationKey } from "@/lib/auth-crypto"
 
 const emailSchema = z.object({ email: z.string().email("Invalid email address") })
 type EmailInput = z.infer<typeof emailSchema>
@@ -82,10 +82,9 @@ export function LoginForm({
     try {
       const kek = await deriveKek(data.password, loginParams.kek_salt)
       const verifyKey = await deriveVerificationKey(kek)
-      const verifyKeyHash = await bcryptHash(verifyKey)
 
       const loginRes = await api.post("api/auth/login", {
-        json: { email, verify_key_hash: verifyKeyHash },
+        json: { email, verify_key_hash: verifyKey },
       }).json<{ session_token: string }>()
 
       setToken(loginRes.session_token)
