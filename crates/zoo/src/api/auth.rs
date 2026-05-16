@@ -5,6 +5,7 @@ use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use sha2::{Digest, Sha256};
 use types::error::{ApiError, ErrorCode, ErrorResponse};
@@ -40,14 +41,36 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, Json<ErrorResponse>)> {
+    tracing::debug!("[LOGIN] received login request for email={}", req.email);
+    tracing::debug!("[LOGIN] verify_key_hash from client={}", req.verify_key_hash);
+
     let user = find_user_by_email(&state.pool, &req.email)
         .await
         .map_err(internal_error)?;
 
     match user {
         Some(u) => {
-            let valid = verify(&req.verify_key_hash, &u.verify_key_hash)
+            tracing::debug!("[LOGIN] user found, stored verify_key_hash={}", u.verify_key_hash);
+
+            let client_key_bytes = STANDARD.decode(&req.verify_key_hash)
+                .map_err(|e| {
+                    tracing::error!("[LOGIN] failed to decode client verify_key_hash: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: ApiError {
+                                code: ErrorCode::ValidationError,
+                                message: "invalid verify_key_hash encoding".to_string(),
+                                details: None,
+                            },
+                        }),
+                    )
+                })?;
+
+            let valid = verify(&client_key_bytes, &u.verify_key_hash)
                 .map_err(|e| internal_error(ZooError::Internal(e.to_string())))?;
+
+            tracing::debug!("[LOGIN] bcrypt verify result: valid={}", valid);
 
             if !valid {
                 return Err((
@@ -61,6 +84,8 @@ pub async fn login(
                     }),
                 ));
             }
+
+            tracing::info!("[LOGIN] user {} logged in successfully", req.email);
 
             let session_token = Uuid::new_v4().to_string();
             let token_hash = format!("{:x}", Sha256::digest(session_token.as_bytes()));
@@ -103,6 +128,10 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<UserRegistration>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+    tracing::debug!("[REGISTER] received registration for email={}", req.email);
+    tracing::debug!("[REGISTER] verify_key_hash={}", req.verify_key_hash);
+    tracing::debug!("[REGISTER] kek_salt={}", req.kek_salt);
+
     crate::validation::validate_email(&req.email).map_err(|e| validation_error(e.to_string()))?;
 
     register_user(
