@@ -30,7 +30,7 @@ export const useFFmpegStore = create<FFmpegState>((set) => ({
     loadPromise = (async () => {
       try {
         const ffmpeg = new FFmpeg()
-        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm"
+        const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd"
 
         await ffmpeg.load({
           coreURL: `${baseURL}/ffmpeg-core.js`,
