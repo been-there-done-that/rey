@@ -1,4 +1,4 @@
-.PHONY: dev dev-desktop dev-server build test lint fmt gen-openapi gen-bindings wasm-pack
+.PHONY: dev dev-desktop dev-server build test lint fmt gen-openapi gen-bindings wasm wasm-clean
 
 dev: dev-desktop dev-server
 
@@ -30,5 +30,14 @@ gen-openapi:
 gen-bindings:
 	cd apps/desktop/src-tauri && cargo run --bin gen-bindings
 
-wasm-pack:
-	wasm-pack build crates/zoo-wasm --target web --out-dir ../../apps/web/src/wasm
+# Build WASM crypto module for browser
+# Outputs to apps/web/src/wasm/ which is imported by the Next.js frontend
+wasm:
+	wasm-pack build crates/zoo-wasm --target web --out-dir apps/web/src/wasm --no-default-features
+	mv crates/zoo-wasm/apps/web/src/wasm apps/web/src/wasm 2>/dev/null || true
+
+# Clean and rebuild WASM from scratch
+wasm-clean:
+	rm -rf apps/web/src/wasm
+	wasm-pack build crates/zoo-wasm --target web --out-dir apps/web/src/wasm --no-default-features
+	mv crates/zoo-wasm/apps/web/src/wasm apps/web/src/wasm 2>/dev/null || true

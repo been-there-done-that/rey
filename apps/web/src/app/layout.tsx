@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, JetBrains_Mono, Inter, Roboto } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { DebugPanel } from "@/components/debug-panel";
 
 const robotoHeading = Roboto({subsets:['latin'],variable:'--font-heading'});
 
@@ -34,7 +35,10 @@ export default function RootLayout({
       lang="en"
       className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, jetbrainsMono.variable, "font-sans", inter.variable, robotoHeading.variable)}
     >
-      <body className="h-screen overflow-hidden flex flex-col">{children}</body>
+      <body className="h-screen overflow-hidden flex flex-col">
+        {children}
+        {process.env.NODE_ENV === "development" && <DebugPanel />}
+      </body>
     </html>
   );
 }
