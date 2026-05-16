@@ -1,0 +1,165 @@
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling zoo v0.1.0 (C:\projects\rust_builds\rey\crates\zoo)
+warning: unexpected `cfg` condition name: `coverage`
+  --> crates\zoo-client\src\sse.rs:24:16
+   |
+24 |     #[cfg_attr(coverage, allow(dead_code))]
+   |                ^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `zoo-client` (lib) generated 1 warning
+warning: unexpected `cfg` condition name: `coverage`
+  --> crates\zoo\bin\server.rs:11:11
+   |
+11 | #[cfg(not(coverage))]
+   |           ^^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `coverage`
+  --> crates\zoo\bin\server.rs:64:7
+   |
+64 | #[cfg(coverage)]
+   |       ^^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(coverage)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unused import: `sqlx::postgres::PgPoolOptions`
+ --> crates\zoo\bin\server.rs:1:5
+  |
+1 | use sqlx::postgres::PgPoolOptions;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::sync::Arc`
+ --> crates\zoo\bin\server.rs:2:5
+  |
+2 | use std::sync::Arc;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `tracing_subscriber::EnvFilter`
+ --> crates\zoo\bin\server.rs:3:5
+  |
+3 | use tracing_subscriber::EnvFilter;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::api::create_router`
+ --> crates\zoo\bin\server.rs:4:5
+  |
+4 | use zoo::api::create_router;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::config::ZooConfig`
+ --> crates\zoo\bin\server.rs:5:5
+  |
+5 | use zoo::config::ZooConfig;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::s3::client::create_client`
+ --> crates\zoo\bin\server.rs:6:5
+  |
+6 | use zoo::s3::client::create_client;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::sse::hub::SseHub`
+ --> crates\zoo\bin\server.rs:7:5
+  |
+7 | use zoo::sse::hub::SseHub;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::workers::garbage_collector::GarbageCollector`
+ --> crates\zoo\bin\server.rs:8:5
+  |
+8 | use zoo::workers::garbage_collector::GarbageCollector;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zoo::workers::stall_detector::StallDetector`
+ --> crates\zoo\bin\server.rs:9:5
+  |
+9 | use zoo::workers::stall_detector::StallDetector;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `zoo` (bin "zoo-server" test) generated 11 warnings (11 duplicates)
+warning: `zoo` (bin "zoo-server") generated 11 warnings (run `cargo fix --bin "zoo-server" -p zoo` to apply 9 suggestions)
+warning: unused variable: `upload_id_s3`
+    --> crates\zoo\tests\integration.rs:1542:9
+     |
+1542 |     let upload_id_s3 = upload["upload_id_s3"].as_str().unwrap().to_string();
+     |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload_id_s3`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `object_key`
+    --> crates\zoo\tests\integration.rs:1543:9
+     |
+1543 |     let object_key = upload["object_key"].as_str().unwrap().to_string();
+     |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_object_key`
+
+warning: unused variable: `file_id`
+    --> crates\zoo\tests\integration.rs:1649:9
+     |
+1649 |     let file_id = register_body["file_id"].as_i64().unwrap();
+     |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_file_id`
+
+warning: unused variable: `upload_id_1`
+    --> crates\zoo\tests\integration.rs:1983:9
+     |
+1983 |     let upload_id_1 = upload1["upload_id"].as_str().unwrap().to_string();
+     |         ^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_upload_id_1`
+
+warning: unused variable: `file_id`
+    --> crates\zoo\tests\integration.rs:3877:9
+     |
+3877 |     let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+     |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_file_id`
+
+warning: unused variable: `sse_client`
+    --> crates\zoo\tests\integration.rs:4951:9
+     |
+4951 |     let sse_client = zoo_client::sse::SseClient::new("http://test.example.com".to_string(), "test-token".to_string());
+     |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_sse_client`
+
+warning: unused variable: `sse_client`
+    --> crates\zoo\tests\integration.rs:4957:9
+     |
+4957 |     let sse_client = zoo_client::sse::SseClient::new("https://api.example.com".to_string(), "custom-token".to_string());
+     |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_sse_client`
+
+warning: associated function `with_server` is never used
+   --> crates\zoo\tests\integration.rs:143:14
+    |
+ 85 | impl TestServer {
+    | --------------- associated function in this implementation
+...
+143 |     async fn with_server<F, Fut>(port: u16, test_fn: F)
+    |              ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zoo` (test "integration") generated 8 warnings (run `cargo fix --test "integration" -p zoo` to apply 7 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.43s
+     Running unittests src\lib.rs (target\llvm-cov-target\debug\deps\zoo-80f2c5c742c90b72.exe)
+error: Unrecognized option: 'show-missing-lines'
+error: test failed, to rerun pass `-p zoo --lib`
+error: process didn't exit successfully: `C:\Users\Deesh\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe test --tests --manifest-path C:\projects\rust_builds\rey\Cargo.toml --target-dir C:\projects\rust_builds\rey\target\llvm-cov-target -p zoo -- --test-threads=1 --show-missing-lines` (exit code: 101)

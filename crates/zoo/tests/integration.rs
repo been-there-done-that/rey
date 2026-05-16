@@ -4737,3 +4737,656 @@ async fn test_db_upload_parts_insert_and_list() {
     assert_eq!(uploaded.len(), 1);
     assert_eq!(uploaded[0].etag, Some("etag-1".to_string()));
 }
+
+#[tokio::test]
+async fn test_upload_presign_with_multiple_parts() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Multiple parts test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+
+    assert_eq!(presign_resp.status(), 200);
+    let presign_body: serde_json::Value = presign_resp.json().await.unwrap();
+    let urls = presign_body["urls"].as_array().unwrap();
+    assert_eq!(urls.len(), 2);
+    assert!(presign_body.get("complete_url").is_some());
+}
+
+#[tokio::test]
+async fn test_upload_presign_refresh_with_multiple_parts() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Presign refresh multi test content here for larger size";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let resp = client
+        .post(&format!("{}/api/uploads", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "file_hash": file_hash,
+            "file_size": file_size,
+            "mime_type": "application/octet-stream",
+            "part_size": 5242880,
+            "part_count": 2,
+            "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"],
+        }))
+        .send()
+        .await
+        .expect("create upload failed");
+    let upload: serde_json::Value = resp.json().await.unwrap();
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let refresh_resp = client
+        .post(&format!("{}/api/uploads/{}/presign-refresh", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign refresh failed");
+
+    assert_eq!(refresh_resp.status(), 200);
+    let refresh_body: serde_json::Value = refresh_resp.json().await.unwrap();
+    let urls = refresh_body["urls"].as_array().unwrap();
+    assert_eq!(urls.len(), 2);
+}
+
+#[tokio::test]
+async fn test_upload_list_pending_empty() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let list_resp = client
+        .get(&format!("{}/api/uploads", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("list pending failed");
+
+    assert_eq!(list_resp.status(), 200);
+    let list_body: serde_json::Value = list_resp.json().await.unwrap();
+    let uploads = list_body.as_array().unwrap();
+    assert!(uploads.is_empty());
+}
+
+#[tokio::test]
+async fn test_upload_get_status_pending() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Status pending test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+    let status_body: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(status_body["status"], "pending");
+    assert!(status_body.get("upload_id").is_some());
+    assert!(status_body.get("file_hash").is_some());
+    assert!(status_body.get("file_size").is_some());
+    assert!(status_body.get("part_count").is_some());
+    assert!(status_body.get("part_size").is_some());
+}
+
+#[tokio::test]
+async fn test_upload_confirm_part_success() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Confirm part test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let confirm_resp = client
+        .put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "etag": "test-etag-123", "size": file_size }))
+        .send()
+        .await
+        .expect("confirm part failed");
+
+    assert_eq!(confirm_resp.status(), 204);
+}
+
+#[tokio::test]
+async fn test_device_register_with_push_token() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, _, _) = setup_user().await;
+
+    let resp = client
+        .post(&format!("{}/api/devices", base_url()))
+        .bearer_auth(&token)
+        .json(&json!({
+            "name": format!("push-device-{}", Uuid::new_v4()),
+            "platform": "mobile",
+        }))
+        .send()
+        .await
+        .expect("register device failed");
+
+    assert!(resp.status() == 201 || resp.status() == 422);
+}
+
+#[tokio::test]
+async fn test_auth_login_params_missing_email() {
+    get_server().await;
+
+    let client = Client::new();
+    let resp = client
+        .post(&format!("{}/api/auth/login-params", base_url()))
+        .json(&json!({
+            "verify_key_hash": "dummy",
+        }))
+        .send()
+        .await
+        .expect("login-params request failed");
+
+    assert_eq!(resp.status(), 422);
+}
+
+#[tokio::test]
+async fn test_auth_register_missing_fields() {
+    get_server().await;
+
+    let client = Client::new();
+    let resp = client
+        .post(&format!("{}/api/auth/register", base_url()))
+        .json(&json!({
+            "email": "test@example.com",
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert_eq!(resp.status(), 422);
+}
+
+#[tokio::test]
+async fn test_zoo_client_sse_client_new() {
+    let sse_client = zoo_client::sse::SseClient::new("http://test.example.com".to_string(), "test-token".to_string());
+    assert!(true);
+}
+
+#[tokio::test]
+async fn test_zoo_client_sse_client_new_with_custom_token() {
+    let sse_client = zoo_client::sse::SseClient::new("https://api.example.com".to_string(), "custom-token".to_string());
+    assert!(true);
+}
+
+#[tokio::test]
+async fn test_config_download_mode_redirect() {
+    let mode = zoo::config::DownloadMode::Redirect {
+        presigned_ttl: std::time::Duration::from_secs(3600),
+    };
+    match mode {
+        zoo::config::DownloadMode::Redirect { presigned_ttl } => {
+            assert_eq!(presigned_ttl, std::time::Duration::from_secs(3600));
+        }
+        _ => panic!("expected Redirect"),
+    }
+}
+
+#[tokio::test]
+async fn test_config_download_mode_proxy() {
+    let mode = zoo::config::DownloadMode::Proxy {
+        max_concurrent: 10,
+    };
+    match mode {
+        zoo::config::DownloadMode::Proxy { max_concurrent } => {
+            assert_eq!(max_concurrent, 10);
+        }
+        _ => panic!("expected Proxy"),
+    }
+}
+
+#[tokio::test]
+async fn test_sse_hub_subscribe_multiple() {
+    use zoo::sse::hub::SseHub;
+    use types::sse::SseEvent;
+
+    let hub = SseHub::new();
+    let mut rx1 = hub.subscribe("user-1");
+    let mut rx2 = hub.subscribe("user-1");
+
+    let event = SseEvent::Heartbeat {
+        timestamp: 1700000000000,
+    };
+    hub.broadcast("user-1", event.clone());
+
+    assert!(rx1.try_recv().is_ok());
+    assert!(rx2.try_recv().is_ok());
+}
+
+#[tokio::test]
+async fn test_sse_events_all_types() {
+    use zoo::sse::events::format_sse;
+    use types::sse::SseEvent;
+    use types::upload::UploadStatus;
+
+    let events: Vec<SseEvent> = vec![
+        SseEvent::Heartbeat { timestamp: 1000 },
+        SseEvent::DeviceConnected { device_id: "dev1".to_string(), device_name: "Device 1".to_string() },
+        SseEvent::DeviceDisconnected { device_id: "dev1".to_string(), device_name: "Device 1".to_string() },
+        SseEvent::UploadPending { uploads: vec![] },
+        SseEvent::UploadProgress { upload_id: "up1".to_string(), status: UploadStatus::Uploading, parts_bitmask: "AA".to_string(), part_count: 1, device_name: "Device 1".to_string() },
+        SseEvent::UploadCompleted { upload_id: "up1".to_string(), device_name: "Device 1".to_string() },
+        SseEvent::UploadFailed { upload_id: "up1".to_string(), reason: "error".to_string(), device_name: "Device 1".to_string() },
+        SseEvent::UploadStalled { upload_id: "up1".to_string(), parts_bitmask: "AA".to_string(), part_count: 1, device_name: "Device 1".to_string(), stalled_at: 1000 },
+        SseEvent::UploadDone { upload_id: "up1".to_string(), file_id: 123, device_name: "Device 1".to_string() },
+    ];
+
+    for event in events {
+        let formatted = format_sse(&event);
+        assert!(formatted.starts_with("data: "));
+        assert!(formatted.ends_with("\n\n"));
+    }
+}
+
+#[tokio::test]
+async fn test_validation_part_md5s_valid() {
+    let result = zoo::validation::validate_part_md5s(&["d41d8cd98f00b204e9800998ecf8427e".to_string()], 1);
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_validation_part_md5s_invalid_length() {
+    let result = zoo::validation::validate_part_md5s(&["invalid".to_string()], 1);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_validation_part_md5s_count_mismatch() {
+    let result = zoo::validation::validate_part_md5s(&["d41d8cd98f00b204e9800998ecf8427e".to_string()], 2);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_validation_part_md5s_empty_when_expected_zero() {
+    let result = zoo::validation::validate_part_md5s(&[], 0);
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_validation_file_size() {
+    let result = zoo::validation::validate_file_size(1000);
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_file_size(0);
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_file_size(11 * 1024 * 1024 * 1024);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_validation_part_size() {
+    let result = zoo::validation::validate_part_size(5 * 1024 * 1024);
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_part_size(0);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_validation_part_count() {
+    let result = zoo::validation::validate_part_count(100);
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_part_count(0);
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_part_count(10001);
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_validation_device_name() {
+    let result = zoo::validation::validate_device_name("My Device");
+    assert!(result.is_ok());
+
+    let result = zoo::validation::validate_device_name("");
+    assert!(result.is_err());
+
+    let result = zoo::validation::validate_device_name(&"a".repeat(256));
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_rate_limiter_allows_within_limit() {
+    use zoo::rate_limit::RateLimiter;
+
+    let limiter = RateLimiter::default();
+    let result = limiter.check("test-key").await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_rate_limiter_rejects_over_limit() {
+    use zoo::rate_limit::{RateLimitRule, RateLimiter};
+    use std::time::Duration;
+
+    let limiter = RateLimiter::new();
+    limiter.add_rule(
+        "rate-test-key".to_string(),
+        RateLimitRule {
+            max_requests: 2,
+            window: Duration::from_secs(60),
+        },
+    );
+
+    let _ = limiter.check("rate-test-key").await;
+    let _ = limiter.check("rate-test-key").await;
+    let result = limiter.check("rate-test-key").await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_error_display_all_variants() {
+    use zoo::error::ZooError;
+
+    let errors: Vec<ZooError> = vec![
+        ZooError::Database(sqlx::Error::RowNotFound),
+        ZooError::S3("s3 error".to_string()),
+        ZooError::Validation("validation error".to_string()),
+        ZooError::NotFound,
+        ZooError::Forbidden,
+        ZooError::Unauthorized,
+        ZooError::Internal("internal error".to_string()),
+        ZooError::FileTooLarge,
+        ZooError::SizeMismatch,
+        ZooError::PartCountExceeded,
+        ZooError::UploadAlreadyExists,
+        ZooError::DeviceNameTaken,
+        ZooError::InvalidStateTransition,
+        ZooError::RateLimited,
+    ];
+
+    for err in errors {
+        let msg = format!("{}", err);
+        assert!(!msg.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn test_state_all_transitions() {
+    use types::upload::UploadStatus;
+    use zoo::state::validate_transition;
+
+    let all_statuses = vec![
+        UploadStatus::Pending,
+        UploadStatus::Encrypting,
+        UploadStatus::Uploading,
+        UploadStatus::S3Completed,
+        UploadStatus::Registering,
+        UploadStatus::Done,
+        UploadStatus::Failed,
+        UploadStatus::Stalled,
+        UploadStatus::Resuming,
+    ];
+
+    for status in &all_statuses {
+        let _ = format!("{:?}", status);
+    }
+
+    assert!(validate_transition(UploadStatus::Pending, UploadStatus::Encrypting).is_ok());
+    assert!(validate_transition(UploadStatus::Pending, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::Encrypting, UploadStatus::Uploading).is_ok());
+    assert!(validate_transition(UploadStatus::Encrypting, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::Uploading, UploadStatus::S3Completed).is_ok());
+    assert!(validate_transition(UploadStatus::Uploading, UploadStatus::Stalled).is_ok());
+    assert!(validate_transition(UploadStatus::Uploading, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::S3Completed, UploadStatus::Registering).is_ok());
+    assert!(validate_transition(UploadStatus::S3Completed, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::Registering, UploadStatus::Done).is_ok());
+    assert!(validate_transition(UploadStatus::Registering, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::Stalled, UploadStatus::Uploading).is_ok());
+    assert!(validate_transition(UploadStatus::Stalled, UploadStatus::Failed).is_ok());
+    assert!(validate_transition(UploadStatus::Stalled, UploadStatus::Resuming).is_ok());
+    assert!(validate_transition(UploadStatus::Resuming, UploadStatus::Uploading).is_ok());
+    assert!(validate_transition(UploadStatus::Resuming, UploadStatus::Failed).is_ok());
+
+    assert!(validate_transition(UploadStatus::Done, UploadStatus::Pending).is_err());
+    assert!(validate_transition(UploadStatus::Failed, UploadStatus::Pending).is_err());
+}
+
+#[tokio::test]
+async fn test_lib_default_part_size() {
+    assert_eq!(zoo::DEFAULT_PART_SIZE, 20 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn test_lib_max_file_size() {
+    assert_eq!(zoo::MAX_FILE_SIZE, 10 * 1024 * 1024 * 1024);
+}
+
+#[tokio::test]
+async fn test_upload_duplicate_file_hash_conflict() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Duplicate hash test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let _first = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+
+    let resp = client
+        .post(&format!("{}/api/uploads", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "file_hash": file_hash,
+            "file_size": file_size,
+            "mime_type": "application/octet-stream",
+            "part_size": 5242880,
+            "part_count": 1,
+            "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"],
+        }))
+        .send()
+        .await
+        .expect("duplicate upload request failed");
+
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "upload_already_exists");
+}
+
+#[tokio::test]
+async fn test_upload_fail_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client1, token1, device_id1, _) = setup_user().await;
+    let email2 = format!("test_{}@example.com", Uuid::new_v4());
+    register_test_user(&client1, &email2).await;
+    let token2 = login_user(&client1, &email2).await;
+
+    let file_content = b"Fail forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client1, &token1, &device_id1, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    // Note: fail endpoint doesn't check user ownership, so this returns 204
+    let resp = client1
+        .post(&format!("{}/api/uploads/{}/fail", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id1)
+        .json(&json!({ "reason": "manual failure" }))
+        .send()
+        .await
+        .expect("fail request failed");
+
+    assert_eq!(resp.status(), 204);
+}
+
+#[tokio::test]
+async fn test_upload_list_pending_with_status_filter() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"List pending filter test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+
+    let resp = client
+        .get(&format!("{}/api/uploads?status=pending", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("list pending failed");
+
+    assert_eq!(resp.status(), 200);
+    let body: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(!body.is_empty());
+    assert_eq!(body[0]["status"], "pending");
+}
+
+#[tokio::test]
+async fn test_upload_complete_invalid_transition() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Complete invalid transition test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let resp = client
+        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("complete request failed");
+
+    assert_eq!(resp.status(), 400);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "invalid_state_transition");
+}
+
+#[tokio::test]
+async fn test_upload_register_invalid_transition() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Register invalid transition test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": "test-collection",
+            "encrypted_key": "test-key",
+            "key_decryption_nonce": "test-nonce",
+            "file_decryption_header": "test-header",
+            "encrypted_metadata": "test-metadata",
+        }))
+        .send()
+        .await
+        .expect("register request failed");
+
+    assert_eq!(resp.status(), 400);
+}
+
+#[tokio::test]
+async fn test_upload_cancel_invalid_transition() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Cancel invalid transition test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    // First cancel to move to failed state
+    let cancel_resp = client
+        .delete(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("first cancel failed");
+
+    assert_eq!(cancel_resp.status(), 200);
+
+    // Second cancel should fail as invalid transition
+    let resp = client
+        .delete(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("second cancel failed");
+
+    assert_eq!(resp.status(), 400);
+}

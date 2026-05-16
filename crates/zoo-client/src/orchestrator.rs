@@ -39,6 +39,17 @@ impl ZooClient {
         }
     }
 
+    #[doc(hidden)]
+    pub fn with_client(base_url: String, client: reqwest::Client) -> Self {
+        Self {
+            inner: Arc::new(ClientInner {
+                base_url,
+                session_token: RwLock::new(None),
+                client,
+            }),
+        }
+    }
+
     pub fn set_session_token(&self, token: String) {
         let mut lock = futures::executor::block_on(self.inner.session_token.write());
         *lock = Some(token);
@@ -552,6 +563,35 @@ impl ZooClient {
         }
 
         Ok(etags)
+    }
+
+    #[doc(hidden)]
+    pub fn find_missing_parts_for_test(
+        &self,
+        state: &UploadState,
+        total_size: usize,
+    ) -> Result<Vec<usize>, ZooError> {
+        self.find_missing_parts(state, total_size)
+    }
+
+    #[doc(hidden)]
+    pub async fn upload_missing_parts_for_test(
+        &self,
+        upload_id: &Uuid,
+        source_bytes: &[u8],
+        urls: &[String],
+        missing_indices: &[usize],
+        part_size: usize,
+    ) -> Result<Vec<String>, ZooError> {
+        self.upload_missing_parts(
+            "test-token",
+            upload_id,
+            source_bytes,
+            urls,
+            missing_indices,
+            part_size,
+        )
+        .await
     }
 }
 

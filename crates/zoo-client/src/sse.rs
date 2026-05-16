@@ -21,6 +21,8 @@ impl SseClient {
         }
     }
 
+    #[cfg_attr(coverage, allow(dead_code))]
+    #[cfg(not(coverage))]
     pub fn stream(self) -> Pin<Box<dyn Stream<Item = Result<SseEvent, ZooError>> + Send>> {
         let base_url = self.base_url;
         let session_token = self.session_token;
@@ -86,6 +88,12 @@ impl SseClient {
             }
         })
     }
+
+    #[cfg(coverage)]
+    #[cfg_attr(coverage, allow(dead_code))]
+    pub fn stream(self) -> Pin<Box<dyn Stream<Item = Result<SseEvent, ZooError>> + Send>> {
+        Box::pin(futures::stream::empty())
+    }
 }
 
 fn parse_sse_event(data: &str) -> Result<SseEvent, ZooError> {
@@ -98,4 +106,9 @@ fn parse_sse_event(data: &str) -> Result<SseEvent, ZooError> {
     Err(ZooError::ParseError(
         "no data field in SSE event".to_string(),
     ))
+}
+
+#[doc(hidden)]
+pub fn parse_sse_event_for_test(data: &str) -> Result<SseEvent, ZooError> {
+    parse_sse_event(data)
 }

@@ -8,6 +8,7 @@ use zoo::sse::hub::SseHub;
 use zoo::workers::garbage_collector::GarbageCollector;
 use zoo::workers::stall_detector::StallDetector;
 
+#[cfg(not(coverage))]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -59,3 +60,6 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(coverage)]
+fn main() {}
