@@ -1,24 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { ProtectedRoute } from "@/components/protected-route";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { useFFmpegStore } from "@/lib/ffmpeg-store";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const loadFFmpeg = useFFmpegStore((s) => s.load);
-
-  useEffect(() => {
-    loadFFmpeg().catch(() => {});
-  }, [loadFFmpeg]);
-
   return (
     <ProtectedRoute>
       <TooltipProvider>
