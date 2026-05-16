@@ -24,6 +24,7 @@ base64 = { workspace = true }
 hex = { workspace = true }
 subtle = { workspace = true }
 aead = { workspace = true }
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

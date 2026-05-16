@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { signupSchema, type SignupInput } from "@/lib/auth-schema"
+import { prepareSignup } from "@/lib/auth-crypto"
 
 export function SignupForm({
   className,
@@ -31,6 +32,11 @@ export function SignupForm({
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [wasmLoading, setWasmLoading] = useState(true)
+
+  useEffect(() => {
+    prepareSignup("", "").catch(() => {}).finally(() => setWasmLoading(false))
+  }, [])
 
   const {
     register,
@@ -46,7 +52,7 @@ export function SignupForm({
     setError("")
 
     try {
-      const { confirm_password: _, ...body } = data
+      const body = await prepareSignup(data.email, data.password)
       await api.post("api/auth/register", { json: body })
       router.push("/login")
     } catch {
@@ -109,8 +115,8 @@ export function SignupForm({
                 </FieldDescription>
               </Field>
               <Field>
-                <Button type="submit" disabled={loading}>
-                  {loading ? "Creating account..." : "Create Account"}
+                <Button type="submit" disabled={loading || wasmLoading}>
+                  {wasmLoading ? "Loading..." : loading ? "Creating account..." : "Create Account"}
                 </Button>
                 <FieldDescription className="text-center">
                   Already have an account?{" "}

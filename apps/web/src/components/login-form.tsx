@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useRouter } from "next/navigation"
@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input"
 import { api } from "@/lib/api"
 import { useAuth } from "@/lib/auth-store"
 import { loginSchema, type LoginInput } from "@/lib/auth-schema"
+import { deriveKek, deriveVerificationKey, bcryptHash } from "@/lib/auth-crypto"
 
 export function LoginForm({
   className,
@@ -34,6 +35,11 @@ export function LoginForm({
   const setToken = useAuth((s) => s.setToken)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [wasmLoading, setWasmLoading] = useState(true)
+
+  useEffect(() => {
+    deriveKek("", "").catch(() => {}).finally(() => setWasmLoading(false))
+  }, [])
 
   const {
     register,
@@ -49,8 +55,19 @@ export function LoginForm({
     setError("")
 
     try {
-      const res = await api.post("api/auth/login", { json: data }).json<{ token: string }>()
-      setToken(res.token)
+      const paramsRes = await api.post("api/auth/login-params", {
+        json: { email: data.email },
+      }).json<{ kek_salt: string; mem_limit: number; ops_limit: number }>()
+
+      const kek = await deriveKek(data.password, paramsRes.kek_salt)
+      const verifyKey = await deriveVerificationKey(kek)
+      const verifyKeyHash = await bcryptHash(verifyKey)
+
+      const loginRes = await api.post("api/auth/login", {
+        json: { email: data.email, verify_key_hash: verifyKeyHash },
+      }).json<{ session_token: string }>()
+
+      setToken(loginRes.session_token)
       router.push("/d/home")
     } catch {
       setError("Invalid email or password")
@@ -95,8 +112,8 @@ export function LoginForm({
                 <FieldError errors={errors.password ? [errors.password] : []} />
               </Field>
               <Field>
-                <Button type="submit" disabled={loading}>
-                  {loading ? "Logging in..." : "Login"}
+                <Button type="submit" disabled={loading || wasmLoading}>
+                  {wasmLoading ? "Loading..." : loading ? "Logging in..." : "Login"}
                 </Button>
                 <FieldDescription className="text-center">
                   Don&apos;t have an account?{" "}
