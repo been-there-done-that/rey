@@ -50,6 +50,19 @@ export async function encryptKey(plaintextB64: string, wrappingB64: string) {
   }
 }
 
+export async function streamEncrypt(dataB64: string, keyB64: string) {
+  await ensureWasm()
+  return JSON.parse(await getWasm().stream_encrypt_b64(dataB64, keyB64)) as {
+    header: string
+    ciphertext: string
+  }
+}
+
+export async function streamDecrypt(headerB64: string, ciphertextB64: string, keyB64: string) {
+  await ensureWasm()
+  return getWasm().stream_decrypt_b64(headerB64, ciphertextB64, keyB64)
+}
+
 export async function prepareSignup(email: string, password: string) {
   const salt = await generateSalt()
   const kek = await deriveKek(password, salt)

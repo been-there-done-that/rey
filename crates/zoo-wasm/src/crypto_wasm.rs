@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use crypto::{
     derive_kek, derive_verification_key, encrypt_key, generate_key, generate_keypair,
+    stream_decrypt, stream_encrypt,
     Argon2Profile, Key256, Salt16,
 };
 use rand_core::RngCore;
@@ -78,6 +79,37 @@ pub fn encrypt_key_b64(plaintext_b64: &str, wrapping_b64: &str) -> Result<String
         "ciphertext": STANDARD.encode(&encrypted.ciphertext),
     });
     Ok(result.to_string())
+}
+
+#[wasm_bindgen]
+pub fn stream_encrypt_b64(plaintext_b64: &str, key_b64: &str) -> Result<String, JsError> {
+    let plaintext = STANDARD.decode(plaintext_b64).map_err(|e| JsError::new(&format!("invalid plaintext: {e}")))?;
+    let key_bytes = STANDARD.decode(key_b64).map_err(|e| JsError::new(&format!("invalid key: {e}")))?;
+    let key: [u8; 32] = key_bytes.try_into().map_err(|_| JsError::new("key must be 32 bytes"))?;
+    let key = Key256::new(key);
+
+    let (header, ciphertext) = stream_encrypt(&plaintext, &key);
+    let result = serde_json::json!({
+        "header": STANDARD.encode(header.as_bytes()),
+        "ciphertext": STANDARD.encode(&ciphertext),
+    });
+    Ok(result.to_string())
+}
+
+#[wasm_bindgen]
+pub fn stream_decrypt_b64(header_b64: &str, ciphertext_b64: &str, key_b64: &str) -> Result<String, JsError> {
+    let header_bytes = STANDARD.decode(header_b64).map_err(|e| JsError::new(&format!("invalid header: {e}")))?;
+    let header: [u8; 24] = header_bytes.try_into().map_err(|_| JsError::new("header must be 24 bytes"))?;
+    let header = types::crypto::Header24::new(header);
+
+    let ciphertext = STANDARD.decode(ciphertext_b64).map_err(|e| JsError::new(&format!("invalid ciphertext: {e}")))?;
+    let key_bytes = STANDARD.decode(key_b64).map_err(|e| JsError::new(&format!("invalid key: {e}")))?;
+    let key: [u8; 32] = key_bytes.try_into().map_err(|_| JsError::new("key must be 32 bytes"))?;
+    let key = Key256::new(key);
+
+    let plaintext = stream_decrypt(&header, &ciphertext, &key)
+        .map_err(|e| JsError::new(&format!("decryption failed: {e:?}")))?;
+    Ok(STANDARD.encode(&plaintext))
 }
 
 #[cfg(test)]
