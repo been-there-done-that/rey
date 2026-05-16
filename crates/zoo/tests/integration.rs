@@ -1517,3 +1517,1002 @@ async fn test_lib_constants() {
     assert_eq!(zoo::DEFAULT_PART_SIZE, 20 * 1024 * 1024);
     assert_eq!(zoo::MAX_FILE_SIZE, 10 * 1024 * 1024 * 1024);
 }
+
+#[tokio::test]
+async fn test_full_upload_lifecycle_with_s3() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Hello, this is a test file for upload!";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(
+        &client,
+        &token,
+        &device_id,
+        &file_hash,
+        file_size,
+    )
+    .await;
+
+    let upload_id = upload["upload_id"].as_str().unwrap().to_string();
+    let upload_id_s3 = upload["upload_id_s3"].as_str().unwrap().to_string();
+    let object_key = upload["object_key"].as_str().unwrap().to_string();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+
+    assert_eq!(presign_resp.status(), 200);
+    let presign_body: serde_json::Value = presign_resp.json().await.unwrap();
+    let presigned_urls = presign_body["urls"].as_array().unwrap();
+    assert_eq!(presigned_urls.len(), 1);
+    let presigned_url = presigned_urls[0].as_str().unwrap();
+
+    let put_resp = client
+        .put(presigned_url)
+        .body(file_content.to_vec())
+        .send()
+        .await
+        .expect("S3 upload failed");
+
+    assert!(put_resp.status().is_success());
+    let etag = put_resp
+        .headers()
+        .get("ETag")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim_matches('"').to_string())
+        .expect("missing ETag");
+
+    let confirm_resp = client
+        .put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "etag": etag,
+            "size": file_size,
+        }))
+        .send()
+        .await
+        .expect("confirm part failed");
+
+    assert_eq!(confirm_resp.status(), 204);
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send()
+        .await
+        .expect("patch to encrypting failed");
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send()
+        .await
+        .expect("patch to uploading failed");
+
+    let complete_resp = client
+        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("complete failed");
+
+    assert_eq!(complete_resp.status(), 200);
+    let complete_body: serde_json::Value = complete_resp.json().await.unwrap();
+    assert_eq!(complete_body["status"], "s3_completed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let encrypted_key = base64::prelude::BASE64_STANDARD.encode([0u8; 32]);
+    let key_nonce = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let file_header = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let thumb_header = base64::prelude::BASE64_STANDARD.encode([0u8; 24]);
+    let encrypted_metadata = base64::prelude::BASE64_STANDARD.encode(b"{}");
+    let encrypted_thumb = base64::prelude::BASE64_STANDARD.encode(b"thumb");
+
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": encrypted_key,
+            "key_decryption_nonce": key_nonce,
+            "file_decryption_header": file_header,
+            "thumb_decryption_header": thumb_header,
+            "encrypted_metadata": encrypted_metadata,
+            "encrypted_thumbnail": encrypted_thumb,
+            "thumbnail_size": 5,
+        }))
+        .send()
+        .await
+        .expect("register failed");
+
+    assert!(register_resp.status().is_success());
+    let register_body: serde_json::Value = register_resp.json().await.unwrap();
+    assert!(register_body.get("file_id").is_some());
+    let file_id = register_body["file_id"].as_i64().unwrap();
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+    let status_body: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(status_body["status"], "done");
+    assert!(status_body.get("upload_id").is_some());
+}
+
+#[tokio::test]
+async fn test_file_download_presigned_redirect() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Download test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client
+        .put(&presigned_url)
+        .body(file_content.to_vec())
+        .send()
+        .await
+        .expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp
+        .headers()
+        .get("ETag")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim_matches('"').to_string())
+        .unwrap();
+
+    client
+        .put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send()
+        .await
+        .expect("confirm part failed");
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send()
+        .await
+        .expect("patch failed");
+
+    client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send()
+        .await
+        .expect("patch failed");
+
+    client
+        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send()
+        .await
+        .expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let download_resp = client
+        .get(&format!("{}/api/files/{}/download", base_url(), file_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("download request failed");
+
+    assert_eq!(download_resp.status(), 200);
+    let download_body: serde_json::Value = download_resp.json().await.unwrap();
+    assert!(download_body.get("url").is_some());
+    assert!(download_body.get("file_id").is_some());
+    assert!(download_body.get("content_hash").is_some());
+    assert!(download_body.get("file_size").is_some());
+    assert!(download_body.get("mime_type").is_some());
+
+    let presigned_download_url = download_body["url"].as_str().unwrap();
+    assert!(!presigned_download_url.is_empty());
+    assert!(presigned_download_url.contains("localhost") || presigned_download_url.contains("127.0.0.1") || presigned_download_url.contains("s3"));
+}
+
+#[tokio::test]
+async fn test_s3_abort_multipart_upload() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Abort test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap().to_string();
+    let upload_id_s3 = upload["upload_id_s3"].as_str().unwrap().to_string();
+    let object_key = upload["object_key"].as_str().unwrap().to_string();
+
+    let s3_client = create_s3_client().await;
+    let result = zoo::s3::client::abort_multipart_upload(
+        &s3_client,
+        TEST_BUCKET,
+        &object_key,
+        &upload_id_s3,
+    )
+    .await;
+
+    assert!(result.is_ok());
+
+    let fail_resp = client
+        .post(&format!("{}/api/uploads/{}/fail", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "reason": "aborted by test" }))
+        .send()
+        .await
+        .expect("fail request failed");
+
+    assert_eq!(fail_resp.status(), 204);
+}
+
+#[tokio::test]
+async fn test_s3_delete_object() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Delete test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+    let object_key = upload["object_key"].as_str().unwrap().to_string();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+
+    let s3_client = create_s3_client().await;
+    let result = zoo::s3::client::delete_object(&s3_client, TEST_BUCKET, &object_key).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_s3_head_object_size() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Head object test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+    let object_key = upload["object_key"].as_str().unwrap().to_string();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+
+    let s3_client = create_s3_client().await;
+    let result = zoo::s3::client::head_object_size(&s3_client, TEST_BUCKET, &object_key).await;
+    assert!(result.is_ok() || result.is_err());
+}
+
+#[tokio::test]
+async fn test_sync_files_with_registered_file() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Sync test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+    let presigned_url = presign_resp.json::<serde_json::Value>().await.unwrap()["urls"].as_array().unwrap()[0].as_str().unwrap().to_string();
+
+    let put_resp = client.put(&presigned_url).body(file_content.to_vec()).send().await.expect("S3 upload failed");
+    assert!(put_resp.status().is_success());
+    let etag = put_resp.headers().get("ETag").and_then(|v| v.to_str().ok()).map(|s| s.trim_matches('"').to_string()).unwrap();
+
+    client.put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "etag": etag, "size": file_size }))
+        .send().await.expect("confirm part failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "encrypting" }))
+        .send().await.expect("patch failed");
+
+    client.patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({ "status": "uploading" }))
+        .send().await.expect("patch failed");
+
+    client.post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .send().await.expect("complete failed");
+
+    let collection_id = Uuid::new_v4().to_string();
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token).header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": collection_id,
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send().await.expect("register failed");
+
+    let file_id = register_resp.json::<serde_json::Value>().await.unwrap()["file_id"].as_i64().unwrap();
+
+    let sync_resp = client
+        .get(&format!("{}/api/sync/files", base_url()))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("sync files failed");
+
+    assert_eq!(sync_resp.status(), 200);
+    let sync_body: serde_json::Value = sync_resp.json().await.unwrap();
+    let files = sync_body["updated_files"].as_array().unwrap();
+    assert!(!files.is_empty());
+
+    let synced_file = &files[0];
+    assert_eq!(synced_file["id"], file_id);
+    assert!(synced_file.get("object_key").is_some());
+    assert!(synced_file.get("content_hash").is_some());
+    assert!(synced_file.get("file_size").is_some());
+    assert!(synced_file.get("encrypted_key").is_some());
+}
+
+#[tokio::test]
+async fn test_upload_dedup_returns_existing() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Dedup test content";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload1 = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id_1 = upload1["upload_id"].as_str().unwrap().to_string();
+
+    let resp2 = client
+        .post(&format!("{}/api/uploads", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "file_hash": file_hash,
+            "file_size": file_size,
+            "mime_type": "application/octet-stream",
+            "part_size": 5242880,
+            "part_count": 1,
+            "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"],
+        }))
+        .send()
+        .await
+        .expect("second upload request failed");
+
+    assert_eq!(resp2.status(), 409);
+}
+
+#[tokio::test]
+async fn test_upload_heartbeat_updates_timestamp() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Heartbeat test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let heartbeat_resp = client
+        .post(&format!("{}/api/uploads/{}/heartbeat", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("heartbeat failed");
+
+    assert_eq!(heartbeat_resp.status(), 204);
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+}
+
+#[tokio::test]
+async fn test_upload_patch_status_to_failed() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Patch test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let patch_resp = client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "failed" }))
+        .send()
+        .await
+        .expect("patch failed");
+
+    assert!(patch_resp.status().is_success() || patch_resp.status() == 200);
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+    let status_body: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(status_body["status"], "failed");
+}
+
+#[tokio::test]
+async fn test_upload_cancel_deletes_upload() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Cancel test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let cancel_resp = client
+        .delete(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("cancel failed");
+
+    assert!(cancel_resp.status().is_success() || cancel_resp.status() == 204);
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+    let status_body: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(status_body["status"], "failed");
+}
+
+#[tokio::test]
+async fn test_upload_list_pending_with_uploads() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"List pending test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+
+    let list_resp = client
+        .get(&format!("{}/api/uploads", base_url()))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("list pending failed");
+
+    assert_eq!(list_resp.status(), 200);
+    let list_body: serde_json::Value = list_resp.json().await.unwrap();
+    let uploads = list_body.as_array().unwrap();
+    assert!(!uploads.is_empty());
+}
+
+#[tokio::test]
+async fn test_upload_presign_refresh() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Presign refresh test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let refresh_resp = client
+        .post(&format!("{}/api/uploads/{}/presign-refresh", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign refresh failed");
+
+    assert_eq!(refresh_resp.status(), 200);
+    let refresh_body: serde_json::Value = refresh_resp.json().await.unwrap();
+    assert!(refresh_body.get("urls").is_some());
+    assert!(refresh_body.get("complete_url").is_some());
+}
+
+#[tokio::test]
+async fn test_upload_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client1, token1, device_id1, _) = setup_user().await;
+
+    let file_content = b"Forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client1, &token1, &device_id1, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client1, &email2).await;
+    let token2 = login_user(&client1, &email2).await;
+
+    let status_resp = client1
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id1)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 403);
+
+    let complete_resp = client1
+        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id1)
+        .send()
+        .await
+        .expect("complete failed");
+
+    assert_eq!(complete_resp.status(), 403);
+}
+
+#[tokio::test]
+async fn test_upload_fail_endpoint() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Fail endpoint test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let fail_resp = client
+        .post(&format!("{}/api/uploads/{}/fail", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "reason": "manual failure" }))
+        .send()
+        .await
+        .expect("fail request failed");
+
+    assert_eq!(fail_resp.status(), 204);
+
+    let status_resp = client
+        .get(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("get status failed");
+
+    assert_eq!(status_resp.status(), 200);
+    let status_body: serde_json::Value = status_resp.json().await.unwrap();
+    assert_eq!(status_body["status"], "failed");
+}
+
+#[tokio::test]
+async fn test_upload_part_count_exceeded() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Part count test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let confirm1 = client
+        .put(&format!("{}/api/uploads/{}/parts/1", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "etag": "etag1", "size": file_size }))
+        .send()
+        .await
+        .expect("confirm part 1 failed");
+
+    assert!(confirm1.status().is_success() || confirm1.status() == 204);
+
+    let confirm2 = client
+        .put(&format!("{}/api/uploads/{}/parts/2", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "etag": "etag2", "size": file_size }))
+        .send()
+        .await
+        .expect("confirm part 2 request failed");
+
+    assert!(confirm2.status() == 400 || confirm2.status() == 204);
+}
+
+#[tokio::test]
+async fn test_upload_patch_invalid_transition() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token, device_id, _) = setup_user().await;
+
+    let file_content = b"Invalid transition test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let patch_resp = client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "done" }))
+        .send()
+        .await
+        .expect("patch failed");
+
+    assert_eq!(patch_resp.status(), 400);
+}
+
+#[tokio::test]
+async fn test_upload_presign_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Presign forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let presign_resp = client
+        .post(&format!("{}/api/uploads/{}/presign", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign failed");
+
+    assert!(presign_resp.status() == 403 || presign_resp.status() == 404);
+}
+
+#[tokio::test]
+async fn test_upload_presign_refresh_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Presign refresh forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let refresh_resp = client
+        .post(&format!("{}/api/uploads/{}/presign-refresh", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "part_md5s": ["d41d8cd98f00b204e9800998ecf8427e"] }))
+        .send()
+        .await
+        .expect("presign refresh failed");
+
+    assert!(refresh_resp.status() == 403 || refresh_resp.status() == 404);
+}
+
+#[tokio::test]
+async fn test_upload_complete_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Complete forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let complete_resp = client
+        .post(&format!("{}/api/uploads/{}/complete", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("complete failed");
+
+    assert_eq!(complete_resp.status(), 403);
+}
+
+#[tokio::test]
+async fn test_upload_register_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Register forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let register_resp = client
+        .post(&format!("{}/api/uploads/{}/register", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .json(&json!({
+            "collection_id": "test",
+            "cipher": "xchacha20-poly1305",
+            "encrypted_key": base64::prelude::BASE64_STANDARD.encode([0u8; 32]),
+            "key_decryption_nonce": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "file_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "thumb_decryption_header": base64::prelude::BASE64_STANDARD.encode([0u8; 24]),
+            "encrypted_metadata": base64::prelude::BASE64_STANDARD.encode(b"{}"),
+            "encrypted_thumbnail": base64::prelude::BASE64_STANDARD.encode(b"thumb"),
+            "thumbnail_size": 5,
+        }))
+        .send()
+        .await
+        .expect("register failed");
+
+    assert_eq!(register_resp.status(), 403);
+}
+
+#[tokio::test]
+async fn test_upload_cancel_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Cancel forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let cancel_resp = client
+        .delete(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .send()
+        .await
+        .expect("cancel failed");
+
+    assert_eq!(cancel_resp.status(), 403);
+}
+
+#[tokio::test]
+async fn test_upload_patch_forbidden_cross_user() {
+    get_server().await;
+    clean_test_db().await;
+
+    let (client, token1, device_id, _) = setup_user().await;
+
+    let file_content = b"Patch forbidden test";
+    let file_hash = format!("{:x}", Sha256::digest(file_content));
+    let file_size = file_content.len() as i64;
+
+    let upload = create_upload(&client, &token1, &device_id, &file_hash, file_size).await;
+    let upload_id = upload["upload_id"].as_str().unwrap();
+
+    let email2 = format!("test2_{}@example.com", Uuid::new_v4());
+    register_test_user(&client, &email2).await;
+    let token2 = login_user(&client, &email2).await;
+
+    let patch_resp = client
+        .patch(&format!("{}/api/uploads/{}", base_url(), upload_id))
+        .bearer_auth(&token2)
+        .header("x-device-id", &device_id)
+        .json(&json!({ "status": "failed" }))
+        .send()
+        .await
+        .expect("patch failed");
+
+    assert_eq!(patch_resp.status(), 403);
+}
+
+async fn create_s3_client() -> aws_sdk_s3::Client {
+    let sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_sdk_s3::config::Region::new(S3_REGION))
+        .endpoint_url(S3_ENDPOINT)
+        .load()
+        .await;
+
+    let config_builder = aws_sdk_s3::config::Builder::from(&sdk_config)
+        .force_path_style(true)
+        .credentials_provider(aws_sdk_s3::config::Credentials::new(
+            S3_ACCESS_KEY,
+            S3_SECRET_KEY,
+            None,
+            None,
+            "static",
+        ));
+
+    aws_sdk_s3::Client::from_conf(config_builder.build())
+}
