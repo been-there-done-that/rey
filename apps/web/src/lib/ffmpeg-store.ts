@@ -16,7 +16,7 @@ let ffmpegInstance: FFmpeg | null = null
 let loadPromise: Promise<FFmpeg> | null = null
 
 export const useFFmpegStore = create<FFmpegState>((set) => ({
-  status: "idle",
+  status: "loading",
   error: null,
   loadTime: null,
   ffmpeg: null,
@@ -52,6 +52,11 @@ export const useFFmpegStore = create<FFmpegState>((set) => ({
     return loadPromise
   },
 }))
+
+// Auto-load on module initialization (browser only)
+if (typeof window !== "undefined") {
+  useFFmpegStore.getState().load().catch(() => {})
+}
 
 export async function extractVideoFrame(file: File, timeSec = 0): Promise<Blob> {
   const ffmpeg = await useFFmpegStore.getState().load()
