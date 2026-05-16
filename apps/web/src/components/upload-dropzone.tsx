@@ -26,6 +26,10 @@ export function UploadDropzone() {
   }, [])
 
   const handleSelect = useCallback(() => {
+    inputRef.current?.click()
+  }, [])
+
+  const handleFileChange = useCallback(() => {
     if (inputRef.current?.files && inputRef.current.files.length > 0) {
       uploadManager.addFiles(inputRef.current.files)
       inputRef.current.value = ""
@@ -51,29 +55,30 @@ export function UploadDropzone() {
   if (files.length === 0) {
     return (
       <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleSelect() }}
+        onClick={handleSelect}
         onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
         className={cn(
-          "flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed p-12 transition-colors",
+          "flex cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed p-12 transition-colors",
           dragging ? "border-primary bg-primary/5" : "border-border"
         )}
       >
         <UploadIcon className="size-10 text-muted-foreground" />
         <div className="text-center">
-          <p className="text-sm font-medium">Drop photos here</p>
+          <p className="text-sm font-medium">Drop photos or videos here</p>
           <p className="text-xs text-muted-foreground">or click to browse</p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleSelect}>
-          Browse files
-        </Button>
         <input
           ref={inputRef}
           type="file"
           multiple
           accept="image/*,video/*"
           className="hidden"
-          onChange={handleSelect}
+          onChange={handleFileChange}
         />
       </div>
     )
@@ -117,7 +122,7 @@ export function UploadDropzone() {
         multiple
         accept="image/*,video/*"
         className="hidden"
-        onChange={handleSelect}
+        onChange={handleFileChange}
       />
     </div>
   )
